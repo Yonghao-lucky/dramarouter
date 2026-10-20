@@ -47,6 +47,7 @@ import {
   useDataTable,
 } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
+import { useModelPricing } from '@/features/model-pricing/api'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
 import { useMediaQuery } from '@/hooks'
 
@@ -145,6 +146,15 @@ const ModelRatioVisualEditorComponent = forwardRef<
   const [globalFilter, setGlobalFilter] = useState('')
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const editorPanelRef = useRef<ModelPricingEditorPanelHandle>(null)
+  // 任务插件模型按用量计价，编辑器需要插件声明的用量字段。
+  const editingModelName = editData?.name ?? ''
+  const usageQuery = useModelPricing(
+    editingModelName ? [editingModelName] : [],
+    Boolean(editingModelName)
+  )
+  const usageSchema = usageQuery.data?.entries.find(
+    (entry) => entry.model_name === editingModelName
+  )?.usage_schema
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 20,
@@ -778,6 +788,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
             <ModelPricingEditorPanel
               ref={editorPanelRef}
               editData={editData}
+              usageSchema={usageSchema}
               onSave={onSave}
               isSaving={isSaving}
               className='h-full min-h-0'
@@ -818,6 +829,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
           open={sheetOpen}
           onOpenChange={setSheetOpen}
           editData={editData}
+          usageSchema={usageSchema}
           onSave={onSave}
           isSaving={isSaving}
         />

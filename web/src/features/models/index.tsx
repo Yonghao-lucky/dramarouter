@@ -30,6 +30,7 @@ import { listDeployments } from './api'
 import { DeploymentAccessGuard } from './components/deployment-access-guard'
 import { DeploymentsTable } from './components/deployments-table'
 import { CreateDeploymentDrawer } from './components/dialogs/create-deployment-drawer'
+import { MissingModelsBanner } from './components/missing-models-banner'
 import { ModelsDialogs } from './components/models-dialogs'
 import { ModelsPrimaryButtons } from './components/models-primary-buttons'
 import { ModelsProvider, useModels } from './components/models-provider'
@@ -136,6 +137,7 @@ function ModelsContent() {
                 ))}
               </TabsList>
             </Tabs>
+            {activeSection === 'metadata' && <MissingModelsBanner />}
             <div className='min-h-0 flex-1'>{content}</div>
           </div>
         </SectionPageLayout.Content>

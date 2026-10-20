@@ -113,7 +113,7 @@ export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingSheetProps
 >(function ModelPricingSheet(
-  { open, onOpenChange, editData, onSave, isSaving },
+  { open, onOpenChange, editData, onSave, isSaving, usageSchema },
   ref
 ) {
   const { t } = useTranslation()
@@ -133,6 +133,7 @@ export const ModelPricingSheet = forwardRef<
         <ModelPricingEditorPanel
           ref={ref}
           editData={editData}
+          usageSchema={usageSchema}
           onSave={onSave}
           isSaving={isSaving}
           className='h-full rounded-none border-0'
