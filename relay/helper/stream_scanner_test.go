@@ -3,6 +3,7 @@ package helper
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
+	"testing/synctest"
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -523,8 +526,7 @@ func TestStreamScannerHandler_StreamStatus_MultipleErrorsPerChunk(t *testing.T) 
 func TestStreamScannerHandler_StreamStatus_ErrorThenStop(t *testing.T) {
 	t.Parallel()
 
-	// Use a large body without [DONE] to avoid race between scanner's [DONE]
-	// and handler's Stop on the sync.Once EndReason.
+	// A fatal handler result takes precedence over buffered upstream events.
 	var b strings.Builder
 	for i := 0; i < 100; i++ {
 		fmt.Fprintf(&b, "data: {\"id\":%d}\n", i)
@@ -570,4 +572,259 @@ func TestStreamScannerHandler_StreamStatus_ReplacesPreInitialized(t *testing.T) 
 
 	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
 	assert.Equal(t, 0, info.StreamStatus.TotalErrorCount())
+}
+
+func TestStreamScannerHandler_DrainsEventsBeforeTransportResult(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		tail     string
+		readErr  error
+		terminal bool
+		reason   relaycommon.StreamEndReason
+	}{
+		{name: "done_after_final_event", tail: "data: [DONE]\n", reason: relaycommon.StreamEndReasonDone},
+		{name: "clean_eof", reason: relaycommon.StreamEndReasonEOF},
+		{name: "truncated_stream", readErr: io.ErrUnexpectedEOF, reason: relaycommon.StreamEndReasonScannerErr},
+		{name: "terminal_before_read_error", readErr: io.ErrUnexpectedEOF, terminal: true, reason: relaycommon.StreamEndReasonDone},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := "data: first\n\ndata: last\n\n" + test.tail
+			var reader io.Reader = strings.NewReader(body)
+			if test.readErr != nil {
+				reader = io.MultiReader(reader, iotest.ErrReader(test.readErr))
+			}
+			c, resp, info := setupStreamTest(t, reader)
+			var received []string
+			StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+				received = append(received, data)
+				if data == "last" && test.terminal {
+					sr.Done()
+				}
+			})
+			assert.Equal(t, []string{"first", "last"}, received)
+			require.NotNil(t, info.StreamStatus)
+			assert.Equal(t, test.reason, info.StreamStatus.EndReason)
+			if test.reason == relaycommon.StreamEndReasonScannerErr {
+				assert.ErrorIs(t, info.StreamStatus.EndError, test.readErr)
+			} else {
+				assert.NoError(t, info.StreamStatus.EndError)
+			}
+		})
+	}
+}
+
+type observedStreamBody struct {
+	io.ReadCloser
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (b *observedStreamBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(func() { close(b.closed) })
+	return err
+}
+
+func TestStreamScannerHandler_PingWriteFailureClosesUpstream(t *testing.T) {
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled, oldSeconds := setting.PingIntervalEnabled, setting.PingIntervalSeconds
+	oldTimeout := constant.StreamingTimeout
+	setting.PingIntervalEnabled, setting.PingIntervalSeconds = true, 1
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled, setting.PingIntervalSeconds = oldEnabled, oldSeconds
+		constant.StreamingTimeout = oldTimeout
+	})
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+	c, resp, info := setupStreamTest(t, reader)
+	body := &observedStreamBody{ReadCloser: reader, closed: make(chan struct{})}
+	resp.Body = body
+	writeErr := errors.New("client socket disconnected")
+	failingWriter := &responsesFailingWriter{ResponseWriter: c.Writer, err: writeErr}
+	c.Writer = failingWriter
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandler(c, resp, info, func(string, *StreamResult) {})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		_ = writer.Close()
+		<-done
+		t.Fatal("failed heartbeat did not stop the stream before the upstream idle timeout")
+	}
+	assert.Equal(t, relaycommon.StreamEndReasonPingFail, info.StreamStatus.EndReason)
+	assert.ErrorIs(t, info.StreamStatus.EndError, writeErr)
+	assert.Equal(t, 1, failingWriter.writes)
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("failed heartbeat left the upstream connection open")
+	}
+}
+
+func TestStreamScannerHandler_TerminalAndCancellationOrdering(t *testing.T) {
+	for _, terminal := range []bool{true, false} {
+		t.Run(map[bool]string{true: "forwarded terminal wins", false: "cancellation discards buffered output"}[terminal], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reader, writer := io.Pipe()
+			t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+			c, resp, info := setupStreamTest(t, reader)
+			c.Request = c.Request.WithContext(ctx)
+			body := &observedStreamBody{ReadCloser: reader, closed: make(chan struct{})}
+			resp.Body = body
+			forwarded, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			defer close(release)
+			var received []string
+			go func() {
+				StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+					received = append(received, data)
+					assert.NoError(t, StringData(c, data))
+					close(forwarded)
+					<-release
+					if terminal {
+						sr.Done()
+					}
+				})
+				close(done)
+			}()
+			_, err := fmt.Fprint(writer, "data: first\n")
+			require.NoError(t, err)
+			select {
+			case <-forwarded:
+			case <-time.After(2 * time.Second):
+				t.Fatal("first event was not forwarded")
+			}
+			_, err = fmt.Fprint(writer, "data: buffered\n\ndata: completed\n\n")
+			require.NoError(t, err)
+			// The next pipe read proves those events are queued behind the callback.
+			_, err = fmt.Fprint(writer, ": queued\n")
+			require.NoError(t, err)
+			cancel()
+			select {
+			case <-body.closed:
+			case <-time.After(2 * time.Second):
+				t.Fatal("cancellation did not close upstream")
+			}
+			release <- struct{}{}
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("stream outlived its callback")
+			}
+			assert.Equal(t, []string{"first"}, received)
+			if terminal {
+				assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+				assert.NoError(t, info.StreamStatus.EndError)
+			} else {
+				assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+				assert.ErrorIs(t, info.StreamStatus.EndError, context.Canceled)
+			}
+		})
+	}
+}
+
+func TestWaitForStreamEnd_FinishedUpstreamDisablesIdleTimeoutWhileDraining(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		deadlineExpired bool
+		cancelDrain     bool
+	}{
+		{name: "handler_completes"},
+		{name: "deadline_and_finished_reader_both_ready", deadlineExpired: true},
+		{name: "client_cancels", cancelDrain: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Keep this bubble limited to the waiting logic. StreamScannerHandler
+			// uses global goroutine pools whose workers may live outside a bubble.
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				ticker := time.NewTicker(time.Second)
+				defer ticker.Stop()
+				if test.deadlineExpired {
+					// Make the deadline ready before delivering the read-complete signal.
+					time.Sleep(time.Second)
+				}
+				scannerFinished := make(chan struct{})
+				close(scannerFinished)
+				handlerStopped := make(chan bool)
+				var reason relaycommon.StreamEndReason
+				var endError error
+				done := make(chan struct{})
+				go func() {
+					reason, endError = waitForStreamEnd(ctx, ticker, scannerFinished, handlerStopped, &streamReadResult{})
+					close(done)
+				}()
+				synctest.Wait()
+				// Only the virtual clock advances; buffered output remains pending
+				// beyond the former upstream idle deadline without a wall-clock wait.
+				time.Sleep(2 * time.Second)
+				synctest.Wait()
+				select {
+				case <-done:
+					require.FailNowf(t, "stream stopped before handler completion or client cancellation", "reason=%s", reason)
+				default:
+				}
+				if test.cancelDrain {
+					cancel()
+				} else {
+					close(handlerStopped)
+				}
+				<-done
+				if test.cancelDrain {
+					assert.Equal(t, relaycommon.StreamEndReasonClientGone, reason)
+					assert.ErrorIs(t, endError, context.Canceled)
+				} else {
+					assert.Equal(t, relaycommon.StreamEndReasonNone, reason)
+					assert.NoError(t, endError)
+				}
+			})
+		})
+	}
+}
+
+func TestWaitForStreamEnd_ReadFailurePrecedesLaterClientCancel(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		readerFinished bool
+		readError      error
+		wantReason     relaycommon.StreamEndReason
+		stopHandler    bool
+	}{
+		{"failed reader", true, io.ErrUnexpectedEOF, relaycommon.StreamEndReasonScannerErr, false},
+		{"failed reader and stopped handler", true, io.ErrUnexpectedEOF, relaycommon.StreamEndReasonScannerErr, true},
+		{"finished reader with pending output", true, nil, relaycommon.StreamEndReasonClientGone, false},
+		{"reader still active", false, nil, relaycommon.StreamEndReasonClientGone, false},
+		{"unpublished read error", false, io.ErrUnexpectedEOF, relaycommon.StreamEndReasonClientGone, false},
+		{"request cancellation reached reader", true, fmt.Errorf("read stopped: %w", context.Canceled), relaycommon.StreamEndReasonClientGone, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			finished, stopped := make(chan struct{}), make(chan bool)
+			result := &streamReadResult{reason: relaycommon.StreamEndReasonEOF}
+			if tc.readError != nil {
+				result.reason, result.err = relaycommon.StreamEndReasonScannerErr, tc.readError
+			}
+			if tc.readerFinished {
+				close(finished)
+			}
+			cancel() // The published read result must precede this cancellation.
+			if tc.stopHandler {
+				close(stopped)
+			}
+			reason, err := waitForStreamEnd(ctx, ticker, finished, stopped, result)
+			assert.Equal(t, tc.wantReason, reason)
+			if tc.wantReason == relaycommon.StreamEndReasonScannerErr {
+				assert.ErrorIs(t, err, tc.readError)
+			} else {
+				assert.ErrorIs(t, err, context.Canceled)
+			}
+		})
+	}
 }

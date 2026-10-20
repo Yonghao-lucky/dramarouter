@@ -103,6 +103,66 @@ func TestBuildClaudeUsageFromOpenAICacheWriteUsage(t *testing.T) {
 	assert.Equal(t, 3616, usage.BillingUsage.OpenAIUsage.PromptTokensDetails.CacheWriteTokens)
 }
 
+func TestOpenAI2ClaudeUsageExcludesCachedInputTokens(t *testing.T) {
+	tests := []struct {
+		name        string
+		details     dto.InputTokenDetails
+		semantic    string
+		wantInput   int
+		wantCreated int
+	}{
+		{name: "uncached input", wantInput: 4921},
+		{name: "cache read only", details: dto.InputTokenDetails{CachedTokens: 4825}, wantInput: 96},
+		{name: "native cache write", details: dto.InputTokenDetails{CacheWriteTokens: 4800}, wantInput: 121, wantCreated: 4800},
+		{name: "legacy cache write", details: dto.InputTokenDetails{CachedCreationTokens: 4800}, wantInput: 121, wantCreated: 4800},
+		{name: "cache read and write", details: dto.InputTokenDetails{CachedTokens: 4000, CacheWriteTokens: 800}, wantInput: 121, wantCreated: 800},
+		{name: "cache read exceeds total", details: dto.InputTokenDetails{CachedTokens: 5000}, wantInput: 0},
+		{name: "existing Anthropic semantics", details: dto.InputTokenDetails{CachedTokens: 4825}, semantic: dto.BillingUsageSemanticAnthropic, wantInput: 4921},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := dto.Usage{
+				PromptTokens:        4921,
+				CompletionTokens:    68,
+				TotalTokens:         4989,
+				PromptTokensDetails: tt.details,
+				UsageSemantic:       tt.semantic,
+			}
+			response := ResponseOpenAI2Claude(&dto.OpenAITextResponse{Usage: upstream}, nil)
+			stream := StreamResponseOpenAI2Claude(&dto.ChatCompletionsStreamResponse{Usage: &upstream}, &convmeta.Values{SendResponseCount: 2})
+			require.Len(t, stream, 2)
+			require.Equal(t, "message_delta", stream[0].Type)
+			finalized := FinalizeStreamResponseOpenAI2Claude(&convmeta.Values{
+				ClaudeConvertInfo: &convmeta.ClaudeConvertInfo{Usage: &upstream},
+			})
+			require.Len(t, finalized, 2)
+			require.Equal(t, "message_delta", finalized[0].Type)
+
+			for _, result := range []struct {
+				name  string
+				usage *dto.ClaudeUsage
+			}{
+				{name: "response", usage: response.Usage},
+				{name: "stream", usage: stream[0].Usage},
+				{name: "stream finalization", usage: finalized[0].Usage},
+			} {
+				t.Run(result.name, func(t *testing.T) {
+					require.NotNil(t, result.usage)
+					assert.Equal(t, tt.wantInput, result.usage.InputTokens)
+					assert.Equal(t, tt.details.CachedTokens, result.usage.CacheReadInputTokens)
+					assert.Equal(t, tt.wantCreated, result.usage.CacheCreationInputTokens)
+					assert.Equal(t, 68, result.usage.OutputTokens)
+					require.NotNil(t, result.usage.BillingUsage)
+					require.NotNil(t, result.usage.BillingUsage.OpenAIUsage)
+					assert.Equal(t, dto.BillingUsageSemanticOpenAI, result.usage.BillingUsage.Semantic)
+					assert.Equal(t, upstream, *result.usage.BillingUsage.OpenAIUsage)
+				})
+			}
+		})
+	}
+}
+
 func TestStreamResponseOpenAI2ClaudeClosesTextThinkingAndToolBlocks(t *testing.T) {
 	info := &convmeta.Values{
 		ClaudeConvertInfo: &convmeta.ClaudeConvertInfo{

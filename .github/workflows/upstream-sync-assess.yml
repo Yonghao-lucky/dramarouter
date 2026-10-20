@@ -1,0 +1,118 @@
+name: Upstream sync · Assess version
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Exact upstream release tag to assess (for example v1.0.0-rc.44)'
+        required: true
+        type: string
+      range_base:
+        description: 'Full upstream commit SHA already assessed (initial fork by default)'
+        required: true
+        default: '8f6961c675932f406260ff0c218bc2aa0603e9b2'
+        type: string
+      batch:
+        description: 'Unique assessment ID: lowercase letters, digits and hyphens'
+        required: true
+        type: string
+      next_version:
+        description: 'Proposed downstream version: v1.0.0-rc.26-novamaas.N'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-assess-${{ github.event.inputs.batch }}
+  cancel-in-progress: false
+
+jobs:
+  assess:
+    name: Read upstream and generate plan with AI handoff instructions
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      GIT_TERMINAL_PROMPT: '0'
+      GIT_AUTHOR_NAME: 'github-actions[bot]'
+      GIT_AUTHOR_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com'
+      GIT_COMMITTER_NAME: 'github-actions[bot]'
+      GIT_COMMITTER_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com'
+      TARGET: ${{ inputs.target }}
+      RANGE_BASE: ${{ inputs.range_base }}
+      BATCH: ${{ inputs.batch }}
+      NEXT_VERSION: ${{ inputs.next_version }}
+    steps:
+      - name: Check out trusted executor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Validate dispatch inputs
+        run: python3 trusted/.github/scripts/upstream_sync_ci.py inspect-input --mode analyze
+      - name: Check out current downstream source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Generate assessment and publication patch
+        run: python3 trusted/.github/scripts/upstream_sync_ci.py analyze --trusted trusted --source source --output publication
+      - name: Preserve report, editable plan and AI handoff instructions
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: upstream-assessment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/docs/upstream-sync/plans/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Store publication input from this run
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: upstream-plan-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            publication/changes.patch
+            publication/publication.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-plan:
+    name: Open WIP PR for manual AI takeover
+    needs: assess
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GIT_TERMINAL_PROMPT: '0'
+      GIT_AUTHOR_NAME: 'github-actions[bot]'
+      GIT_AUTHOR_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com'
+      GIT_COMMITTER_NAME: 'github-actions[bot]'
+      GIT_COMMITTER_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com'
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Check out trusted publisher only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: publisher
+          persist-credentials: false
+      - name: Download only the assessment artifact produced above
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.assess.outputs.artifact_id }}
+          path: publication
+          merge-multiple: true
+      - name: Publish planning branch and draft PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 publisher/.github/scripts/upstream_sync_ci.py publish --source publisher --output publication

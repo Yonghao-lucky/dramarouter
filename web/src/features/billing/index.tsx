@@ -46,6 +46,7 @@ import { BillingProfileCard } from './components/billing-profile-card'
 import { ConsumptionPanel } from './components/consumption-panel'
 import { CorrectionPanel } from './components/correction-panel'
 import { StatementsPanel } from './components/statements-panel'
+import { UsageAuditPanel } from './components/usage-audit-panel'
 import type { BillingAccountOption } from './types'
 
 export function Billing() {
@@ -168,6 +169,11 @@ export function Billing() {
                 {t('Billing identity')}
               </TabsTrigger>
               {financialAccounting && (
+                <TabsTrigger value='usage-audit'>
+                  {t('Token and cache audit')}
+                </TabsTrigger>
+              )}
+              {financialAccounting && (
                 <TabsTrigger value='corrections'>
                   {t('Billing adjustments')}
                 </TabsTrigger>
@@ -197,6 +203,11 @@ export function Billing() {
             <TabsContent value='identity'>
               <BillingProfileCard userId={userId} admin={admin} />
             </TabsContent>
+            {financialAccounting && (
+              <TabsContent value='usage-audit'>
+                <UsageAuditPanel key={userId} userId={userId} />
+              </TabsContent>
+            )}
             {financialAccounting && (
               <TabsContent value='corrections'>
                 <CorrectionPanel

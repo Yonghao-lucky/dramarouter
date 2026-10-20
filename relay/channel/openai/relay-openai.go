@@ -84,7 +84,9 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 				response.Choices[j].Delta.Reasoning = nil
 			}
 			info.ThinkingContentInfo.SendLastThinkingContent = true
-			helper.ObjectData(c, response)
+			if err := helper.ObjectData(c, response); err != nil {
+				return err
+			}
 		}
 
 		// Convert reasoning content to regular content if any
@@ -102,7 +104,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
-func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (resultUsage *dto.Usage, apiErr *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
@@ -121,67 +123,110 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var responseTextBuilder strings.Builder
 	var toolCount int
 	var usage = &dto.Usage{}
+	var usageStreamData string
 	var lastStreamData string
-	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	seenStreamToolCalls := make(map[string]struct{})
 	var streamFunctionCallNames []string
-
-	// 检查是否为音频模型
-	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
+	defer func() {
+		// A retryable attempt has not been settled. Its tool observations must
+		// not carry into the next channel and charge the user twice.
+		if apiErr == nil {
+			for _, name := range streamFunctionCallNames {
+				info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
+			}
+		}
+	}()
+	finishedChoices := make(map[int]bool)
+	clientWriteFailed := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		var streamResponse struct {
+			Usage   *dto.Usage         `json:"usage"`
+			Error   *types.OpenAIError `json:"error"`
+			Choices []struct {
+				Index        int     `json:"index"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		parseErr := common.UnmarshalJsonStr(data, &streamResponse)
+		if parseErr == nil && service.ValidUsage(streamResponse.Usage) {
+			// The current frame has already arrived from upstream. Retain its
+			// authoritative usage even if writing the pending frame fails.
+			usage = streamResponse.Usage
+			usageStreamData = data
+			containStreamUsage = true
+		}
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, forceFormat, thinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
-				sr.Error(err)
+				clientWriteFailed = true
+				if c.Request.Context().Err() != nil {
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+				}
+				sr.Stop(err)
+				return
 			}
+			lastStreamData = ""
 		}
 		if len(data) > 0 {
-			// 对音频模型，保存倒数第二个stream data
-			if isAudioModel && lastStreamData != "" {
-				secondLastStreamData = lastStreamData
+			if parseErr != nil {
+				sr.Stop(parseErr)
+				return
+			}
+			if streamResponse.Error != nil {
+				sr.Stop(fmt.Errorf("upstream returned an error inside the OpenAI stream"))
+				return
+			}
+			for _, choice := range streamResponse.Choices {
+				finishedChoices[choice.Index] = finishedChoices[choice.Index] ||
+					(choice.FinishReason != nil && strings.TrimSpace(*choice.FinishReason) != "")
 			}
 
 			lastStreamData = data
 			collectStreamFunctionCallNames(data, seenStreamToolCalls, &streamFunctionCallNames)
 			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
 				logger.LogError(c, "error processing stream token data: "+err.Error())
-				sr.Error(err)
+				sr.Stop(err)
 			}
 		}
 	})
 
-	// 对音频模型，从倒数第二个stream data中提取usage信息
-	if isAudioModel && secondLastStreamData != "" {
-		var streamResp struct {
-			Usage *dto.Usage `json:"usage"`
+	// Chat accepts an explicit [DONE], or a graceful EOF after every requested
+	// choice supplied finish_reason. EOF/timeout alone cannot prove completion.
+	streamCompleted := info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone
+	if info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF && len(finishedChoices) > 0 {
+		expectedChoices := 1
+		if request, ok := info.Request.(*dto.GeneralOpenAIRequest); ok && request != nil && request.N != nil && *request.N > 1 {
+			expectedChoices = *request.N
 		}
-		err := common.Unmarshal([]byte(secondLastStreamData), &streamResp)
-		if err == nil && streamResp.Usage != nil && service.ValidUsage(streamResp.Usage) {
-			usage = streamResp.Usage
-			containStreamUsage = true
-
-			if common.DebugEnabled {
-				logger.LogDebug(c, "Audio model usage extracted from second last SSE: PromptTokens=%d, CompletionTokens=%d, TotalTokens=%d, InputTokens=%d, OutputTokens=%d",
-					usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
-					usage.InputTokens, usage.OutputTokens)
+		streamCompleted = len(finishedChoices) >= expectedChoices
+		for _, finished := range finishedChoices {
+			if !finished {
+				streamCompleted = false
+				break
 			}
 		}
 	}
+	streamCompleted = streamCompleted && !info.StreamStatus.HasErrors()
 
 	// 处理最后的响应
 	shouldSendLastResp := true
-	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
-		&containStreamUsage, info, &shouldSendLastResp); err != nil {
-		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
+	if streamCompleted {
+		if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
+			&containStreamUsage, info, &shouldSendLastResp); err != nil {
+			logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
+		}
 	}
 	if kimiPassthrough {
 		shouldSendLastResp = true
 	}
 
-	if info.RelayFormat == types.RelayFormatOpenAI {
+	if streamCompleted && c.Request.Context().Err() == nil && info.RelayFormat == types.RelayFormatOpenAI {
 		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, forceFormat, thinkingToContent)
+			if err := sendStreamData(c, info, lastStreamData, forceFormat, thinkingToContent); err != nil {
+				clientWriteFailed = true
+				info.StreamStatus.RecordError(err.Error())
+			}
 		}
 	}
 
@@ -190,13 +235,62 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		usage.CompletionTokens += toolCount * 7
 	}
 
+	if containStreamUsage {
+		applyUsagePostProcessing(info, usage, common.StringToByteSlice(usageStreamData))
+	}
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
-	for _, name := range streamFunctionCallNames {
-		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
+	if c.Request.Context().Err() != nil || clientWriteFailed || info.StreamStatus.EndReason == relaycommon.StreamEndReasonPingFail {
+		return usage, nil
+	}
+	if !streamCompleted {
+		info.StreamStatus.RecordError("OpenAI stream ended without a valid terminal signal")
+		logger.LogError(c, "OpenAI stream ended without a valid terminal signal: "+info.StreamStatus.Summary())
+		message := "The upstream stream ended before the response was complete."
+		code := "upstream_stream_incomplete"
+		if info.StreamStatus.EndReason == relaycommon.StreamEndReasonTimeout {
+			code = "upstream_stream_timeout"
+			message = "The upstream response stream timed out before completion."
+		}
+		if !c.Writer.Written() {
+			helper.ResetEventStreamHeaders(c)
+			return nil, types.NewOpenAIError(fmt.Errorf("%s", message), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
+		// The next event normally flushes this pending chunk. On interruption
+		// there is no next event, but an already-started response must retain
+		// its final partial content or tool arguments before reporting failure.
+		var pendingChunk dto.ChatCompletionsStreamResponse
+		if common.UnmarshalJsonStr(lastStreamData, &pendingChunk) == nil && len(pendingChunk.Choices) > 0 {
+			pendingData := lastStreamData
+			if info.RelayFormat != types.RelayFormatOpenAI {
+				// Converters must not turn a finish-bearing partial chunk into
+				// message_stop or a successful Gemini terminal on a failed stream.
+				pendingChunk.Usage = nil
+				for i := range pendingChunk.Choices {
+					pendingChunk.Choices[i].FinishReason = nil
+				}
+				encoded, err := common.Marshal(pendingChunk)
+				if err != nil {
+					info.StreamStatus.RecordError("failed to encode interrupted OpenAI stream chunk: " + err.Error())
+					return usage, nil
+				}
+				pendingData = string(encoded)
+			}
+			helper.ExtendWriteDeadline(c)
+			if err := HandleStreamFormat(c, info, pendingData, forceFormat, thinkingToContent); err != nil {
+				info.StreamStatus.RecordError("failed to write interrupted OpenAI stream chunk: " + err.Error())
+				return usage, nil
+			}
+		}
+		if err := writeTextStreamError(c, info, code, message); err != nil {
+			info.StreamStatus.RecordError("failed to write OpenAI stream error: " + err.Error())
+		}
+		return usage, nil
 	}
 
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	if err := HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage); err != nil {
+		info.StreamStatus.RecordError("failed to write OpenAI stream terminal: " + err.Error())
+	}
 
 	return usage, nil
 }
