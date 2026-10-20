@@ -37,11 +37,13 @@ uses the MIT-licensed gopdf/gofpdi libraries; their notices are included below.
 | backend     | production  | Go        | `github.com/google/uuid`                              | `v1.6.0`                             | BSD-3-Clause                                       |
 | backend     | production  | Go        | `github.com/gorilla/websocket`                        | `v1.5.0`                             | BSD-2-Clause                                       |
 | backend     | production  | Go        | `github.com/grafana/pyroscope-go`                     | `v1.2.7`                             | Apache-2.0                                         |
+| backend     | production  | Go        | `github.com/grafana/sobek`                            | `v0.0.0-20260708062710-267a0e055bb4` | MIT                                                |
 | backend     | production  | Go        | `github.com/jfreymuth/oggvorbis`                      | `v1.0.5`                             | MIT                                                |
 | backend     | production  | Go        | `github.com/jinzhu/copier`                            | `v0.4.0`                             | MIT                                                |
 | backend     | production  | Go        | `github.com/joho/godotenv`                            | `v1.5.1`                             | MIT                                                |
 | backend     | production  | Go        | `github.com/mewkiz/flac`                              | `v1.0.13`                            | Unlicense                                          |
 | backend     | production  | Go        | `github.com/nicksnyder/go-i18n/v2`                    | `v2.6.1`                             | MIT                                                |
+| backend     | test        | Go        | `github.com/openai/openai-go`                         | `v1.12.0`                            | Apache-2.0                                         |
 | backend     | production  | Go        | `github.com/pkg/errors`                               | `v0.9.1`                             | BSD-2-Clause                                       |
 | backend     | production  | Go        | `github.com/pquerna/otp`                              | `v1.5.0`                             | Apache-2.0                                         |
 | backend     | production  | Go        | `github.com/samber/hot`                               | `v0.11.0`                            | MIT                                                |
@@ -69,6 +71,7 @@ uses the MIT-licensed gopdf/gofpdi libraries; their notices are included below.
 | backend     | production  | Go        | `gorm.io/gorm`                                        | `v1.25.2`                            | MIT                                                |
 | backend     | production  | Go        | `github.com/expr-lang/expr`                           | `v1.17.8`                            | MIT                                                |
 | web | production | npm | `@base-ui/react` | `1.6.0` | MIT |
+| web | production | npm | `@codemirror/lang-javascript` | `6.2.5` | MIT |
 | web | production | npm | `@codemirror/lang-markdown` | `6.5.1` | MIT |
 | web | production | npm | `@codemirror/language` | `6.12.4` | MIT |
 | web | production | npm | `@codemirror/state` | `6.7.1` | MIT |

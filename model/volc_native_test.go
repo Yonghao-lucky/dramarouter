@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/stretchr/testify/require"
@@ -64,11 +65,12 @@ func TestVolcNativeChannelIsolationWithAndWithoutCache(t *testing.T) {
 		{"/api/v3/images/generations", native.Id},
 		{"/v1/video/generations", compatible.Id},
 	} {
+		filters := []dto.ChannelFilter{{Kind: dto.FilterRequestPath, RequestPath: tc.path}}
 		channelSyncLock.RLock()
-		ids := filterChannelsByRequestPathAndModel([]int{native.Id, compatible.Id}, tc.path, "seedance")
+		ids, _ := filterCandidateIDs([]int{native.Id, compatible.Id}, "seedance", filters)
 		channelSyncLock.RUnlock()
 		require.Equal(t, []int{tc.id}, ids)
-		abilities := filterAbilitiesByRequestPathAndModel([]Ability{{ChannelId: native.Id}, {ChannelId: compatible.Id}}, tc.path, "seedance")
+		abilities := filterAbilitiesByConstraints([]Ability{{ChannelId: native.Id}, {ChannelId: compatible.Id}}, "seedance", filters)
 		require.Len(t, abilities, 1)
 		require.Equal(t, tc.id, abilities[0].ChannelId)
 	}

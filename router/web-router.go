@@ -19,31 +19,34 @@ type WebAssets struct {
 	IndexPage []byte
 }
 
-func SetWebRouter(router *gin.Engine, assets WebAssets) {
+func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.HandlerFunc) {
 	frontendFS := common.EmbedFolder(assets.BuildFS, "web/dist")
 
-	router.Use(gzip.Gzip(gzip.DefaultCompression))
-	router.Use(middleware.GlobalWebRateLimit())
-	router.Use(middleware.Cache())
-	router.Use(static.Serve("/", frontendFS))
-	router.NoRoute(func(c *gin.Context) {
-		c.Set(middleware.RouteTagKey, "web")
-		if isBackendRoute(c.Request.URL.Path) {
-			c.Header("Cache-Control", "no-store")
-			controller.RelayNotFound(c)
-			return
-		}
-		// Hashed asset chunks are immutable build artifacts. Serving index.html for
-		// a missing one makes the browser parse HTML as a module and crash the SPA
-		// after every redeploy, so asset paths must 404 instead of falling back.
-		if strings.HasPrefix(c.Request.URL.Path, "/static/") {
-			c.Header("Cache-Control", "no-store")
-			c.Status(http.StatusNotFound)
-			return
-		}
-		c.Header("Cache-Control", "no-cache")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", assets.IndexPage)
-	})
+	router.NoRoute(
+		pluginDispatcher,
+		middleware.RouteTag("web"),
+		gzip.Gzip(gzip.DefaultCompression),
+		middleware.GlobalWebRateLimit(),
+		middleware.Cache(),
+		static.Serve("/", frontendFS),
+		func(c *gin.Context) {
+			if isBackendRoute(c.Request.URL.Path) {
+				c.Header("Cache-Control", "no-store")
+				controller.RelayNotFound(c)
+				return
+			}
+			// Hashed asset chunks are immutable build artifacts. Serving index.html for
+			// a missing one makes the browser parse HTML as a module and crash the SPA
+			// after every redeploy, so asset paths must 404 instead of falling back.
+			if strings.HasPrefix(c.Request.URL.Path, "/static/") {
+				c.Header("Cache-Control", "no-store")
+				c.Status(http.StatusNotFound)
+				return
+			}
+			c.Header("Cache-Control", "no-cache")
+			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.IndexPage)
+		},
+	)
 }
 
 func isBackendRoute(path string) bool {

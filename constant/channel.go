@@ -62,6 +62,7 @@ const (
 	// It only serves Fire Ark's native /api/v3/* API and must never be selected
 	// for OpenAI-compatible /v1 requests.
 	ChannelTypeVolcNative = 61
+	ChannelTypeTaskPlugin = 62
 	ChannelTypeDummy      // this one is only for count, do not add any channel after this
 
 )
@@ -129,6 +130,14 @@ var ChannelBaseURLs = []string{
 	"",                                          //59
 	"",                                          //60
 	"https://ark.cn-beijing.volces.com",         //61
+	"",                                          //62
+}
+
+func GetChannelBaseURL(channelType int) string {
+	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
+		return ""
+	}
+	return ChannelBaseURLs[channelType]
 }
 
 var ChannelTypeNames = map[int]string{
@@ -190,6 +199,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
 	ChannelTypeVolcNative:     "Volc Native",
+	ChannelTypeTaskPlugin:     "Task Plugin",
 }
 
 func GetChannelTypeName(channelType int) string {

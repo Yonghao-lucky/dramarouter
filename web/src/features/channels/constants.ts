@@ -23,6 +23,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const CHANNEL_TYPE_NEW_API = 60
 export const CHANNEL_TYPE_VOLC_NATIVE = 61
+// Downstream assigns 62 (upstream uses 61, which is Volc Native here).
+export const CHANNEL_TYPE_TASK_PLUGIN = 62
 export const CHANNEL_TYPE_DOUBAO_VIDEO = 54
 export const BASE64_STAGING_CHANNEL_TYPES = new Set([
   CHANNEL_TYPE_DOUBAO_VIDEO,
@@ -88,6 +90,7 @@ export const CHANNEL_TYPES = {
   59: 'Sub2API',
   60: 'New API',
   [CHANNEL_TYPE_VOLC_NATIVE]: 'Volc Native',
+  [CHANNEL_TYPE_TASK_PLUGIN]: 'Task Plugin',
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
@@ -101,6 +104,7 @@ const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
   48,
   60,
   58,
+  CHANNEL_TYPE_TASK_PLUGIN,
   42,
   34,
   20,
@@ -161,6 +165,17 @@ export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
   }
   return ordered
 })()
+
+export function channelTypeOptionsForTaskPluginBind(
+  canBindTaskPlugin: boolean
+): { value: number; label: string }[] {
+  if (canBindTaskPlugin) {
+    return CHANNEL_TYPE_OPTIONS
+  }
+  return CHANNEL_TYPE_OPTIONS.filter(
+    (option) => option.value !== CHANNEL_TYPE_TASK_PLUGIN
+  )
+}
 
 // ============================================================================
 // Channel Status (label values are i18n keys; use t(config.label) in components)

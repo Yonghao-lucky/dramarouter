@@ -860,6 +860,14 @@ func (info *RelayInfo) HasSendResponse() bool {
 	return info.FirstResponseTime.After(info.StartTime)
 }
 
+type OriginTaskRef struct {
+	TaskID         string
+	UpstreamTaskID string
+	Action         string
+	Status         string
+	Data           []byte
+}
+
 type TaskRelayInfo struct {
 	Action       string
 	OriginTaskID string
@@ -869,6 +877,10 @@ type TaskRelayInfo struct {
 
 	ConsumeQuota   bool
 	RequestMetrics hosttypes.TaskRequestMetrics
+
+	// OriginTasks are plugin-declared public-task dependencies resolved by the
+	// host. Driver hooks receive these as ctx.originTasks; presenters do not.
+	OriginTasks []OriginTaskRef
 
 	// LockedChannel holds the full channel object when the request is bound to
 	// a specific channel (e.g., remix on origin task's channel). Stored as any
@@ -959,15 +971,16 @@ func (t *TaskSubmitReq) UnmarshalMetadata(v any) error {
 }
 
 type TaskInfo struct {
-	Code             int    `json:"code"`
-	TaskID           string `json:"task_id"`
-	Status           string `json:"status"`
-	Reason           string `json:"reason,omitempty"`
-	Url              string `json:"url,omitempty"`
-	RemoteUrl        string `json:"remote_url,omitempty"`
-	Progress         string `json:"progress,omitempty"`
-	CompletionTokens int    `json:"completion_tokens,omitempty"` // 用于按倍率计费
-	TotalTokens      int    `json:"total_tokens,omitempty"`      // 用于按倍率计费
+	Code             int            `json:"code"`
+	TaskID           string         `json:"task_id"`
+	Status           string         `json:"status"`
+	Reason           string         `json:"reason,omitempty"`
+	Url              string         `json:"url,omitempty"`
+	RemoteUrl        string         `json:"remote_url,omitempty"`
+	Progress         string         `json:"progress,omitempty"`
+	CompletionTokens int            `json:"completion_tokens,omitempty"` // 用于按倍率计费
+	TotalTokens      int            `json:"total_tokens,omitempty"`      // 用于按倍率计费
+	UsageFacts       map[string]any `json:"usage_facts,omitempty"`
 }
 
 func FailTaskInfo(reason string) *TaskInfo {

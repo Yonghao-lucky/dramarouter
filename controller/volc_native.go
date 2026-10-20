@@ -97,7 +97,7 @@ func RelayVolcNativeImage(c *gin.Context) {
 
 	baseURL := strings.TrimRight(info.ChannelBaseUrl, "/")
 	if baseURL == "" {
-		baseURL = constant.ChannelBaseURLs[constant.ChannelTypeVolcNative]
+		baseURL = constant.GetChannelBaseURL(constant.ChannelTypeVolcNative)
 	}
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, baseURL+"/api/v3/images/generations", bytes.NewReader(body))
 	if err != nil {
@@ -145,7 +145,7 @@ func RelayVolcNativeImage(c *gin.Context) {
 		respondVolcNativeError(c, http.StatusInternalServerError, "billing_settlement_failed", "failed to settle usage")
 		return
 	}
-	service.LogTaskConsumption(c, info)
+	service.LogTaskConsumption(c, info, nil)
 	succeeded = true
 	c.Data(resp.StatusCode, contentType, responseBody)
 }
@@ -242,7 +242,7 @@ func RelayVolcNativeTaskDelete(c *gin.Context) {
 	}
 	baseURL := strings.TrimRight(channel.GetBaseURL(), "/")
 	if baseURL == "" {
-		baseURL = constant.ChannelBaseURLs[constant.ChannelTypeVolcNative]
+		baseURL = constant.GetChannelBaseURL(constant.ChannelTypeVolcNative)
 	}
 	upstreamURL := baseURL + "/api/v3/contents/generations/tasks/" + url.PathEscape(task.GetUpstreamTaskID())
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete, upstreamURL, nil)

@@ -24,13 +24,21 @@ type loginNoticeTaskRow struct {
 	FailReason string
 }
 
-var videoTaskActions = []string{
-	constant.TaskActionGenerate,
-	constant.TaskActionTextGenerate,
-	constant.TaskActionFirstTailGenerate,
-	constant.TaskActionReferenceGenerate,
-	constant.TaskActionRemix,
-}
+// videoTaskActions matches both the canonical action names and the legacy
+// spellings persisted before task actions were normalized.
+var videoTaskActions = func() []string {
+	var actions []string
+	for _, action := range []string{
+		constant.TaskActionImageToVideo,
+		constant.TaskActionTextToVideo,
+		constant.TaskActionFirstTailToVideo,
+		constant.TaskActionReferenceToVideo,
+		constant.TaskActionRemix,
+	} {
+		actions = append(actions, constant.TaskActionSpellings(action)...)
+	}
+	return actions
+}()
 
 var videoViolationMarkers = []string{
 	"violation",

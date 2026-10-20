@@ -27,6 +27,22 @@ export type PricingVendor = {
   description?: string
 }
 
+export type BillingUsageUnit = 'second' | 'count' | 'token' | 'credit'
+
+export type BillingUsageFieldSchema = {
+  type?: 'number' | 'boolean'
+  unit?: BillingUsageUnit
+  enum?: string[]
+  description?: string | Record<string, string>
+}
+
+export type BillingUsageSchema = Record<string, BillingUsageFieldSchema>
+
+export type BillingUsageExample = {
+  label: string
+  facts: Record<string, string | number>
+}
+
 export type PricingModel = {
   id: number
   model_name: string

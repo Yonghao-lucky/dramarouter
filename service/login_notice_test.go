@@ -40,6 +40,8 @@ func TestGetLoginNoticeStatsUsesCalendarWindowsAndVideoActions(t *testing.T) {
 
 	tasks := []model.Task{
 		{TaskID: "today-ok", UserId: user.Id, Action: constant.TaskActionGenerate, SubmitTime: todayStart.Add(time.Hour).Unix(), Status: model.TaskStatusSuccess},
+		// Rows persisted before action normalization keep the legacy spelling.
+		{TaskID: "today-legacy", UserId: user.Id, Action: "generate", SubmitTime: todayStart.Add(3 * time.Hour).Unix(), Status: model.TaskStatusSuccess},
 		{TaskID: "today-violation", UserId: user.Id, Action: constant.TaskActionTextGenerate, SubmitTime: todayStart.Add(2 * time.Hour).Unix(), Status: model.TaskStatusFailure, FailReason: "content policy violation"},
 		{TaskID: "seven-day", UserId: user.Id, Action: constant.TaskActionFirstTailGenerate, SubmitTime: todayStart.AddDate(0, 0, -6).Unix(), Status: model.TaskStatusSuccess},
 		{TaskID: "thirty-day-violation", UserId: user.Id, Action: constant.TaskActionReferenceGenerate, SubmitTime: todayStart.AddDate(0, 0, -29).Unix(), Status: model.TaskStatusFailure, FailReason: "安全审核不通过"},
@@ -51,7 +53,7 @@ func TestGetLoginNoticeStatsUsesCalendarWindowsAndVideoActions(t *testing.T) {
 
 	stats, err := GetLoginNoticeStats(user.Id, now)
 	require.NoError(t, err)
-	assert.Equal(t, LoginNoticePeriodStats{Generated: 2, Violations: 1}, stats.Today)
-	assert.Equal(t, LoginNoticePeriodStats{Generated: 3, Violations: 1}, stats.SevenDays)
-	assert.Equal(t, LoginNoticePeriodStats{Generated: 4, Violations: 2}, stats.ThirtyDays)
+	assert.Equal(t, LoginNoticePeriodStats{Generated: 3, Violations: 1}, stats.Today)
+	assert.Equal(t, LoginNoticePeriodStats{Generated: 4, Violations: 1}, stats.SevenDays)
+	assert.Equal(t, LoginNoticePeriodStats{Generated: 5, Violations: 2}, stats.ThirtyDays)
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -167,6 +168,15 @@ func modelManagementRequest(t *testing.T, handler gin.HandlerFunc, method, path 
 }
 
 func TestModelManagementDatabaseMatrix(t *testing.T) {
+	_, err := jsplugin.DefaultRegistry.Register(`
+export const meta = {apiVersion: 1, key: "model-management-task", name: "Management task fixture", version: "1.0.0", author: {name: "Test"}, models: ["matrix-task"], fetchMode: "per_task", usageSchema: {seconds: {type: "number", unit: "second"}}};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+`, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("model-management-task") })
 	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
 		t.Run(dialect.kind, func(t *testing.T) {
 			if dialect.env != "" && os.Getenv(dialect.env) == "" {
@@ -250,19 +260,17 @@ func TestModelManagementDatabaseMatrix(t *testing.T) {
 				assert.Equal(t, 1, conflicts)
 			})
 			t.Run("task_usage_and_builtin_reset", func(t *testing.T) {
-				// This build has no task-plugin registry, so task usage schemas are
-				// empty and only generic expression validation applies.
 				snapshot, err := model.GetModelPricingSnapshot([]string{"matrix-task"})
 				require.NoError(t, err)
-				require.Empty(t, snapshot.Entries[0].UsageSchema)
-				expression := `tier("base", p * 2 + c * 8)`
+				assert.Contains(t, snapshot.Entries[0].UsageSchema, "seconds")
+				expression := `tier("base", u("seconds") * 0.25)`
 				change := model.ModelPricingChange{ModelName: "matrix-task", ExpectedVersion: snapshot.Entries[0].Version, Pricing: model.PricingValues{"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": expression}}
 				require.NoError(t, model.UpdateModelPricing([]model.ModelPricingChange{change}))
 				snapshot, err = model.GetModelPricingSnapshot([]string{"matrix-task"})
 				require.NoError(t, err)
 				assert.Equal(t, expression, snapshot.Entries[0].Effective["billing_setting.billing_expr"])
 				change.ExpectedVersion = snapshot.Entries[0].Version
-				change.Pricing["billing_setting.billing_expr"] = `tier("base", p *`
+				change.Pricing["billing_setting.billing_expr"] = `tier("base", u("undeclared") * 1)`
 				assert.Error(t, model.UpdateModelPricing([]model.ModelPricingChange{change}))
 				{
 					const name = "gpt-6-astra"
@@ -745,7 +753,7 @@ func TestModelDeletionDatabaseMatrix(t *testing.T) {
 					}
 					common.MemoryCacheEnabled = true
 					model.InitChannelCache()
-					cached, err := model.GetRandomSatisfiedChannel("default", name, 0, "")
+					cached, err := model.GetRandomSatisfiedChannel("default", name, 0, nil)
 					require.NoError(t, err)
 					require.NotNil(t, cached)
 					baseline, err := model.GetModelPricingSnapshot([]string{name})
@@ -785,7 +793,7 @@ func TestModelDeletionDatabaseMatrix(t *testing.T) {
 						require.NoError(t, db.First(&after, original.Id).Error)
 						assert.Equal(t, original, after)
 					}
-					cached, err = model.GetRandomSatisfiedChannel("default", name, 0, "")
+					cached, err = model.GetRandomSatisfiedChannel("default", name, 0, nil)
 					require.NoError(t, err)
 					require.NotNil(t, cached)
 					recorder := modelManagementRequest(t, BatchDeleteModelMeta, http.MethodPost, "/api/models/delete", body, &response)
@@ -814,10 +822,10 @@ func TestModelDeletionDatabaseMatrix(t *testing.T) {
 						}
 					}
 					for _, group := range []string{"default", "vip", "last-model-group"} {
-						cached, _ = model.GetRandomSatisfiedChannel(group, name, 0, "")
+						cached, _ = model.GetRandomSatisfiedChannel(group, name, 0, nil)
 						assert.Nil(t, cached)
 					}
-					cached, err = model.GetRandomSatisfiedChannel("default", name+"-keep", 0, "")
+					cached, err = model.GetRandomSatisfiedChannel("default", name+"-keep", 0, nil)
 					require.NoError(t, err)
 					require.NotNil(t, cached)
 					pricingAfter, err := model.GetModelPricingSnapshot([]string{name, second.ModelName})

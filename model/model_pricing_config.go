@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -33,8 +34,7 @@ type ModelPricingEntry struct {
 	Version     string                               `json:"version"`
 	Configured  PricingValues                        `json:"configured"`
 	Effective   PricingValues                        `json:"effective"`
-	// UsageSchema 由任务插件声明；未安装插件子系统时为空。
-	UsageSchema map[string]any `json:"usage_schema,omitempty"`
+	UsageSchema map[string]jsplugin.UsageFieldSchema `json:"usage_schema,omitempty"`
 }
 
 type ModelPricingSnapshot struct {
@@ -173,9 +173,17 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 	}
 	sort.Strings(names)
 	result := &ModelPricingSnapshot{Entries: make([]ModelPricingEntry, 0, len(names)), Options: make(map[string]string), EmptyVersion: ModelPricingVersion(PricingValues{})}
+	generation := jsplugin.DefaultRegistry.Generation()
 	for _, name := range names {
 		configured := modelPricingValues(values, name)
 		entry := ModelPricingEntry{ModelName: name, Version: ModelPricingVersion(configured), Configured: configured, Effective: effectiveModelPricing(values, name)}
+		if plugin, ok := generation.GetByModel(name); ok {
+			entry.UsageSchema = plugin.Meta.UsageSchema
+		} else if target, ok := ResolveTaskModelAlias(generation, name); ok {
+			if plugin, ok := generation.Get(target.PluginKey); ok {
+				entry.UsageSchema = plugin.Meta.UsageSchema
+			}
+		}
 		result.Entries = append(result.Entries, entry)
 	}
 	// Preserve the existing settings editor's full-map interface. Built-in
@@ -221,7 +229,20 @@ func ValidateModelPricing(name string, values PricingValues) error {
 			if !ok || strings.TrimSpace(expression) == "" {
 				return errors.New("billing expression is required")
 			}
-			if err := billing_setting.SmokeTestExpr(expression); err != nil {
+			generation := jsplugin.DefaultRegistry.Generation()
+			var err error
+			if plugin, ok := generation.GetByModel(name); ok {
+				err = billing_setting.SmokeTestTaskExpr(expression, plugin.Meta.UsageSchema)
+			} else if target, resolved := ResolveTaskModelAlias(generation, name); resolved {
+				if plugin, ok := generation.Get(target.PluginKey); ok {
+					err = billing_setting.SmokeTestTaskExpr(expression, plugin.Meta.UsageSchema)
+				} else {
+					err = billing_setting.SmokeTestExpr(expression)
+				}
+			} else {
+				err = billing_setting.SmokeTestExpr(expression)
+			}
+			if err != nil {
 				return fmt.Errorf("model %s: %w", name, err)
 			}
 			continue

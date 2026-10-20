@@ -118,7 +118,7 @@ func TestVolcNativeSeedance25RejectsUnsupportedPricingTiers(t *testing.T) {
 	}
 }
 
-func TestTaskAdaptorDoResponsePreservesNativeFieldsAndHidesUpstreamID(t *testing.T) {
+func TestTaskAdaptorParseResponsePreservesNativeFieldsAndHidesUpstreamID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -131,17 +131,21 @@ func TestTaskAdaptorDoResponsePreservesNativeFieldsAndHidesUpstreamID(t *testing
 	}
 	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public_id"}}
 
-	upstreamID, storedBody, taskErr := (&TaskAdaptor{}).DoResponse(ctx, resp, info)
+	parsed, taskErr := (&TaskAdaptor{}).ParseResponse(ctx, resp, info)
 
 	require.Nil(t, taskErr)
-	require.Equal(t, "upstream-task-id", upstreamID)
-	require.Equal(t, raw, storedBody)
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Contains(t, recorder.Body.String(), `"id":"task_public_id"`)
-	require.NotContains(t, recorder.Body.String(), "upstream-task-id")
-	require.Contains(t, recorder.Body.String(), `"stream":false`)
-	require.Contains(t, recorder.Body.String(), `"sequential_image_generation":true`)
-	require.Contains(t, recorder.Body.String(), `"watermark":false`)
+	require.NotNil(t, parsed)
+	require.Equal(t, "upstream-task-id", parsed.UpstreamTaskID)
+	require.Equal(t, raw, parsed.TaskData)
+	// Parsing must not write to the client; the controller presents after the durable barrier.
+	require.False(t, ctx.Writer.Written())
+	clientBody, err := common.Marshal(parsed.ClientResponse)
+	require.NoError(t, err)
+	require.Contains(t, string(clientBody), `"id":"task_public_id"`)
+	require.NotContains(t, string(clientBody), "upstream-task-id")
+	require.Contains(t, string(clientBody), `"stream":false`)
+	require.Contains(t, string(clientBody), `"sequential_image_generation":true`)
+	require.Contains(t, string(clientBody), `"watermark":false`)
 }
 
 func TestVolcNativeRequestPreservesBodyAndBillingContext(t *testing.T) {
@@ -243,13 +247,16 @@ func TestTaskAdaptorDoResponseRestoresMappedAlias(t *testing.T) {
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public_id"},
 	}
 
-	upstreamID, storedBody, taskErr := (&TaskAdaptor{}).DoResponse(ctx, resp, info)
+	parsed, taskErr := (&TaskAdaptor{}).ParseResponse(ctx, resp, info)
 
 	require.Nil(t, taskErr)
-	assert.Equal(t, "upstream-task-id", upstreamID)
-	assert.Equal(t, raw, storedBody)
-	assert.Contains(t, recorder.Body.String(), `"model":"public-seedance"`)
-	assert.NotContains(t, recorder.Body.String(), "doubao-seedance-2-0-260128")
+	require.NotNil(t, parsed)
+	assert.Equal(t, "upstream-task-id", parsed.UpstreamTaskID)
+	assert.Equal(t, raw, parsed.TaskData)
+	clientBody, err := common.Marshal(parsed.ClientResponse)
+	require.NoError(t, err)
+	assert.Contains(t, string(clientBody), `"model":"public-seedance"`)
+	assert.NotContains(t, string(clientBody), "doubao-seedance-2-0-260128")
 }
 
 func TestVolcNativeRejectsInvalidContentAndExcessiveDuration(t *testing.T) {

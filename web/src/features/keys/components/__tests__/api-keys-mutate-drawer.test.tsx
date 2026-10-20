@@ -152,8 +152,7 @@ function findButton(text: string, required = true): HTMLButtonElement | null {
 }
 
 function getControlByLabel(labelText: 'Name' | 'Quantity'): HTMLInputElement
-function getControlByLabel(labelText: 'Group'): HTMLButtonElement
-function getControlByLabel(labelText: 'Auto group order'): HTMLElement
+function getControlByLabel(labelText: 'Default Auto order'): HTMLElement
 function getControlByLabel(labelText: string): HTMLElement {
   const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
     (candidate) => candidate.textContent?.trim() === labelText
@@ -209,8 +208,8 @@ describe('API keys mutate drawer Auto group integration', () => {
     installApiFixtures(createdPayloads)
     await renderCreateDrawer()
 
-    const groupTrigger = getControlByLabel('Group')
-    expect(groupTrigger.textContent?.includes('auto')).toBe(true)
+    // Aggregate mode is the default when the user has Auto groups.
+    expect(getControlByLabel('Default Auto order')).toBeTruthy()
     expect(
       document.body.textContent?.includes(
         'Using the complete global Auto order (2 groups)'
@@ -242,7 +241,7 @@ describe('API keys mutate drawer Auto group integration', () => {
     installApiFixtures(createdPayloads)
     await renderCreateDrawer()
 
-    const autoOrderControl = getControlByLabel('Auto group order')
+    const autoOrderControl = getControlByLabel('Default Auto order')
     const addGroupTrigger = autoOrderControl.querySelector<HTMLButtonElement>(
       'button[role="combobox"]'
     )
@@ -259,10 +258,9 @@ describe('API keys mutate drawer Auto group integration', () => {
     )
     expect(findButton('Restore global Auto', true).disabled).toBe(false)
 
-    const groupTrigger = getControlByLabel('Group')
-    selectComboboxOption(groupTrigger, 'Standard access')
+    fireEvent.click(findButton('Single group', true))
     expect(document.querySelector('button[aria-label="Remove vip"]')).toBe(null)
-    selectComboboxOption(groupTrigger, 'Automatic routing')
+    fireEvent.click(findButton('Aggregate key', true))
 
     expect(
       document.querySelector('button[aria-label="Remove vip"]')

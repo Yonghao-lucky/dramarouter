@@ -6,6 +6,7 @@ package volcnative
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -17,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/seedancepricing"
+	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/doubao"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -154,36 +156,42 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	return bytes.NewReader(body), nil
 }
 
-// DoResponse replaces the upstream task id with NewAPI's public id and restores
-// the public model alias after a mapping. The upstream id remains private in
-// Task.PrivateData and is never returned to the caller; all other response
-// fields are forwarded as received.
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (string, []byte, *dto.TaskError) {
+// ParseResponse replaces the upstream task id with NewAPI's public id and
+// restores the public model alias after a mapping. The upstream id remains
+// private in Task.PrivateData and is never returned to the caller; all other
+// response fields are forwarded as received.
+func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *dto.TaskError) {
 	if resp == nil || resp.Body == nil {
-		return "", nil, taskError(fmt.Errorf("upstream response is empty"), "invalid_response", http.StatusBadGateway)
+		return nil, taskError(fmt.Errorf("upstream response is empty"), "invalid_response", http.StatusBadGateway)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, taskError(err, "read_response_body_failed", http.StatusInternalServerError)
+		return nil, taskError(err, "read_response_body_failed", http.StatusInternalServerError)
 	}
 
 	upstreamID := gjson.GetBytes(body, "id")
 	if !upstreamID.Exists() || upstreamID.Type != gjson.String || upstreamID.String() == "" {
-		return "", nil, taskError(fmt.Errorf("upstream task id is empty"), "invalid_response", http.StatusBadGateway)
+		return nil, taskError(fmt.Errorf("upstream task id is empty"), "invalid_response", http.StatusBadGateway)
 	}
 	clientBody, err := sjson.SetBytes(body, "id", info.PublicTaskID)
 	if err != nil {
-		return "", nil, taskError(err, "patch_response_failed", http.StatusInternalServerError)
+		return nil, taskError(err, "patch_response_failed", http.StatusInternalServerError)
 	}
 	if info.ChannelMeta != nil && info.IsModelMapped {
 		clientBody, err = helper.RestoreOriginalModelInJSONBody(clientBody, info.OriginModelName)
 		if err != nil {
-			return "", nil, taskError(err, "response_model_restore_failed", http.StatusInternalServerError)
+			return nil, taskError(err, "response_model_restore_failed", http.StatusInternalServerError)
 		}
 	}
-	c.Data(resp.StatusCode, responseContentType(resp), clientBody)
-	return upstreamID.String(), body, nil
+	if !gjson.ValidBytes(clientBody) {
+		return nil, taskError(fmt.Errorf("upstream response is not valid JSON"), "invalid_response", http.StatusBadGateway)
+	}
+	return &channel.TaskSubmitResponse{
+		UpstreamTaskID: upstreamID.String(),
+		TaskData:       body,
+		ClientResponse: json.RawMessage(clientBody),
+	}, nil
 }
 
 func rawRequestBody(c *gin.Context) ([]byte, error) {
@@ -199,13 +207,6 @@ func rawRequestBody(c *gin.Context) ([]byte, error) {
 		return nil, fmt.Errorf("request body must be valid JSON")
 	}
 	return body, nil
-}
-
-func responseContentType(resp *http.Response) string {
-	if value := resp.Header.Get("Content-Type"); value != "" {
-		return value
-	}
-	return "application/json"
 }
 
 func taskError(err error, code string, statusCode int) *dto.TaskError {

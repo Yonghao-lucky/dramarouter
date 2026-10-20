@@ -348,6 +348,7 @@ func migrateDB() error {
 		&QuotaData{},
 		&Task{},
 		&TaskRequestBody{},
+		&TaskPlugin{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},

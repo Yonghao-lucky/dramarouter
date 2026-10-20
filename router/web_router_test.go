@@ -31,7 +31,7 @@ func TestIsBackendRouteAllowsAssetLibrarySPARefresh(t *testing.T) {
 
 func TestMissingBackendRoutesAreNotCachedAsFrontendAssets(t *testing.T) {
 	engine := gin.New()
-	SetWebRouter(engine, WebAssets{IndexPage: []byte("<html>app</html>")})
+	SetWebRouter(engine, WebAssets{IndexPage: []byte("<html>app</html>")}, func(c *gin.Context) { c.Next() })
 	for _, path := range []string{"/api/docs", "/v1/missing"} {
 		t.Run(path, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
