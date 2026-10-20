@@ -37,7 +37,7 @@ func TestHailuoResponsesProtocol(t *testing.T) {
 			"size":     "1920x1080",
 			"metadata": map[string]any{"first_frame_image": "https://cdn.example/frame.png"},
 		},
-		wantUsageKeys:  []string{"resolution", "seconds"},
+		wantUsageKeys:  []string{"input_images", "input_video_seconds", "resolution", "seconds"},
 		wantVendorName: "hailuo",
 	})
 }
@@ -69,4 +69,78 @@ func TestHailuoArtifactContentProxy(t *testing.T) {
 	assert.Equal(t, http.MethodHead, descriptor.Method)
 	assert.Equal(t, map[string]string{"Accept": "video/*", "Authorization": "Bearer test-ak"}, descriptor.Headers)
 	assert.False(t, descriptor.Credentialless)
+}
+
+func loadHailuoPlugin(t *testing.T) *jsplugin.LoadedPlugin {
+	t.Helper()
+	source, err := builtinplugins.Source("hailuo")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "hailuo"})
+	require.NoError(t, err)
+	return plugin
+}
+
+func callHailuoHook(t *testing.T, plugin *jsplugin.LoadedPlugin, hook string, args ...any) map[string]any {
+	t.Helper()
+	value, err := plugin.Engine.Call(t.Context(), hook, args...)
+	require.NoError(t, err)
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &decoded))
+	return decoded
+}
+
+func hailuoH3SubmitContext(requestBody map[string]any) map[string]any {
+	return map[string]any{
+		"requestBody":   requestBody,
+		"model":         "MiniMax-H3",
+		"upstreamModel": "MiniMax-H3",
+		"baseUrl":       "https://api.minimax.example",
+		"apiKey":        "test-ak",
+	}
+}
+
+// Input media is a billing dimension for MiniMax-H3 only: every image counts,
+// and an input video reserves the documented 15-second maximum at submit.
+func TestHailuoH3InputMediaUsageFacts(t *testing.T) {
+	plugin := loadHailuoPlugin(t)
+	testCases := []struct {
+		name    string
+		request map[string]any
+		want    map[string]any
+	}{
+		{
+			name:    "text only",
+			request: map[string]any{"prompt": "p", "duration": 6, "size": "2K"},
+			want:    map[string]any{"seconds": float64(6), "resolution": "2K", "input_images": float64(0), "input_video_seconds": float64(0)},
+		},
+		{
+			name:    "two frame images",
+			request: map[string]any{"prompt": "p", "images": []any{"a.png", "b.png"}},
+			want:    map[string]any{"seconds": float64(5), "resolution": "768P", "input_images": float64(2), "input_video_seconds": float64(0)},
+		},
+		{
+			name:    "reference video",
+			request: map[string]any{"prompt": "p", "metadata": map[string]any{"reference_video": "ref.mp4"}},
+			want:    map[string]any{"seconds": float64(5), "resolution": "768P", "input_images": float64(0), "input_video_seconds": float64(15)},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := hailuoH3SubmitContext(testCase.request)
+			ctx["usagePurpose"] = "facts"
+			assert.Equal(t, testCase.want, callHailuoHook(t, plugin, "extractUsage", ctx))
+		})
+	}
+}
+
+func TestHailuoH3SubmitsToV2(t *testing.T) {
+	plugin := loadHailuoPlugin(t)
+	descriptor := callHailuoHook(t, plugin, "buildSubmitRequest", hailuoH3SubmitContext(map[string]any{"prompt": "a boy playing basketball"}))
+	assert.Equal(t, "https://api.minimax.example/v2/video_generation", descriptor["url"])
+	assert.Equal(t, "text_to_video", descriptor["action"])
+	body, err := common.Marshal(descriptor["body"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"MiniMax-H3","content":[{"type":"text","text":"a boy playing basketball"}],"resolution":"768P","duration":5,"ratio":"16:9"}`, string(body))
 }

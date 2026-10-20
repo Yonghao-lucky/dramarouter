@@ -61,6 +61,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import type { BillingUsageSchema } from '@/features/pricing/types'
 import { cn } from '@/lib/utils'
 
 import {
@@ -81,6 +82,7 @@ import {
 } from './model-pricing-core'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
 import { formatPricingNumber } from './pricing-format'
+import { TaskUsagePricingFields } from './task-usage-pricing-fields'
 import { TieredPricingEditor } from './tiered-pricing-editor'
 
 export type { ModelRatioData } from './model-pricing-core'
@@ -91,6 +93,9 @@ type ModelPricingSheetProps = {
   editData?: ModelRatioData | null
   onSave?: () => void | Promise<void>
   isSaving?: boolean
+  // 任务插件声明的计费用量字段；存在时按用量填写价格。
+  usageSchema?: BillingUsageSchema
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type ModelPricingEditorPanelProps = Omit<
@@ -141,10 +146,13 @@ export const ModelPricingEditorPanel = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingEditorPanelProps
 >(function ModelPricingEditorPanel(
-  { editData, className, onSave, isSaving },
+  { editData, className, onSave, isSaving, usageSchema },
   ref
 ) {
   const { t } = useTranslation()
+  const isTaskUsageModel = Boolean(
+    usageSchema && Object.keys(usageSchema).length > 0
+  )
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
@@ -336,7 +344,9 @@ export const ModelPricingEditorPanel = forwardRef<
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
     if (nextMode === 'tiered_expr' && !billingExpr) {
-      setBillingExpr('tier("base", p * 0 + c * 0)')
+      setBillingExpr(
+        isTaskUsageModel ? 'tier("base", 0)' : 'tier("base", p * 0 + c * 0)'
+      )
     }
   }
 
@@ -641,14 +651,23 @@ export const ModelPricingEditorPanel = forwardRef<
 
                   <TabsContent value='tiered_expr' className='pt-0'>
                     <FieldGroup className='gap-5'>
-                      <TieredPricingEditor
-                        key={editorReloadToken}
-                        modelName={watchedValues.name}
-                        billingExpr={billingExpr}
-                        requestRuleExpr={requestRuleExpr}
-                        onBillingExprChange={setBillingExpr}
-                        onRequestRuleExprChange={setRequestRuleExpr}
-                      />
+                      {isTaskUsageModel && usageSchema ? (
+                        <TaskUsagePricingFields
+                          key={editorReloadToken}
+                          schema={usageSchema}
+                          billingExpr={billingExpr}
+                          onBillingExprChange={setBillingExpr}
+                        />
+                      ) : (
+                        <TieredPricingEditor
+                          key={editorReloadToken}
+                          modelName={watchedValues.name}
+                          billingExpr={billingExpr}
+                          requestRuleExpr={requestRuleExpr}
+                          onBillingExprChange={setBillingExpr}
+                          onRequestRuleExprChange={setRequestRuleExpr}
+                        />
+                      )}
                     </FieldGroup>
                   </TabsContent>
                 </Tabs>
