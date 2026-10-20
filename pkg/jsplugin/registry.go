@@ -90,7 +90,33 @@ type Meta struct {
 	Protocols     []ProtocolClaim             `json:"protocols"`
 	UsageSchema   map[string]UsageFieldSchema `json:"usageSchema,omitempty"`
 	UsageExamples []UsageExample              `json:"usageExamples,omitempty"`
-	Auth          AuthMeta                    `json:"auth"`
+	// UsageProfiles narrows the billing facts per model family; models outside
+	// every profile use UsageSchema.
+	UsageProfiles []UsageProfile `json:"usageProfiles,omitempty"`
+	Auth          AuthMeta       `json:"auth"`
+}
+
+// UsageProfile declares the billing facts of a subset of the plugin's models.
+type UsageProfile struct {
+	Models   []string                    `json:"models"`
+	Schema   map[string]UsageFieldSchema `json:"schema"`
+	Examples []UsageExample              `json:"examples,omitempty"`
+}
+
+// UsageForModels returns the usage metadata of the first candidate a profile
+// declares, matched case-insensitively. Callers pass the upstream model before
+// the client-facing one; when no candidate is profiled the defaults apply.
+func (m Meta) UsageForModels(models ...string) (map[string]UsageFieldSchema, []UsageExample) {
+	for _, model := range models {
+		for _, profile := range m.UsageProfiles {
+			for _, declared := range profile.Models {
+				if model != "" && strings.EqualFold(declared, model) {
+					return profile.Schema, profile.Examples
+				}
+			}
+		}
+	}
+	return m.UsageSchema, m.UsageExamples
 }
 
 // ProtocolSupports reports whether the named protocol claim includes mode.
@@ -946,7 +972,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "apiVersion", "key", "name", "icon", "description", "version", "author", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "auth", "endpoints", "submitPaths", "actions":
+		case "apiVersion", "key", "name", "icon", "description", "version", "author", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, fmt.Errorf("plugin meta has unknown field %q", field)
 		}
@@ -1031,6 +1057,12 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	if usageExamples, exists := object["usageExamples"]; exists {
 		meta.UsageExamples, err = decodeUsageExamples(usageExamples)
+		if err != nil {
+			return Meta{}, err
+		}
+	}
+	if usageProfiles, exists := object["usageProfiles"]; exists {
+		meta.UsageProfiles, err = decodeUsageProfiles(usageProfiles)
 		if err != nil {
 			return Meta{}, err
 		}
@@ -1247,7 +1279,69 @@ func normalizeV1Meta(meta *Meta) error {
 	if err := validateUsageExamples(meta.UsageSchema, meta.UsageExamples); err != nil {
 		return err
 	}
+	profileModels := make(map[string]struct{})
+	for index, profile := range meta.UsageProfiles {
+		if len(profile.Models) == 0 {
+			return fmt.Errorf("plugin meta usageProfiles[%d] models must contain at least one model", index)
+		}
+		for _, model := range profile.Models {
+			if _, exists := models[model]; !exists {
+				return fmt.Errorf("plugin meta usageProfiles[%d] model %q is not declared in plugin meta models", index, model)
+			}
+			if _, duplicate := profileModels[model]; duplicate {
+				return fmt.Errorf("plugin meta usageProfiles model %q belongs to multiple profiles", model)
+			}
+			profileModels[model] = struct{}{}
+		}
+		if profile.Schema == nil {
+			return fmt.Errorf("plugin meta usageProfiles[%d] schema must be an object", index)
+		}
+		for name, field := range profile.Schema {
+			if err := validateUsageFieldSchema(name, field); err != nil {
+				return fmt.Errorf("plugin meta usageProfiles[%d]: %w", index, err)
+			}
+		}
+		if err := validateUsageExamples(profile.Schema, profile.Examples); err != nil {
+			return fmt.Errorf("plugin meta usageProfiles[%d]: %w", index, err)
+		}
+	}
 	return nil
+}
+
+func decodeUsageProfiles(value any) ([]UsageProfile, error) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("plugin meta usageProfiles must be an array")
+	}
+	profiles := make([]UsageProfile, 0, len(items))
+	for index, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("plugin meta usageProfiles[%d] must be an object", index)
+		}
+		for key := range object {
+			if key != "models" && key != "schema" && key != "examples" {
+				return nil, fmt.Errorf("plugin meta usageProfiles[%d] has unknown field %q", index, key)
+			}
+		}
+		models, err := strictStringSlice(object, "models")
+		if err != nil {
+			return nil, fmt.Errorf("plugin meta usageProfiles[%d]: %w", index, err)
+		}
+		schema, err := decodeUsageSchema(object["schema"])
+		if err != nil {
+			return nil, fmt.Errorf("plugin meta usageProfiles[%d]: %w", index, err)
+		}
+		profile := UsageProfile{Models: models, Schema: schema}
+		if examples, exists := object["examples"]; exists {
+			profile.Examples, err = decodeUsageExamples(examples)
+			if err != nil {
+				return nil, fmt.Errorf("plugin meta usageProfiles[%d]: %w", index, err)
+			}
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles, nil
 }
 
 func decodeUsageSchema(value any) (map[string]UsageFieldSchema, error) {

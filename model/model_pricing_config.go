@@ -178,10 +178,10 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 		configured := modelPricingValues(values, name)
 		entry := ModelPricingEntry{ModelName: name, Version: ModelPricingVersion(configured), Configured: configured, Effective: effectiveModelPricing(values, name)}
 		if plugin, ok := generation.GetByModel(name); ok {
-			entry.UsageSchema = plugin.Meta.UsageSchema
+			entry.UsageSchema, _ = plugin.Meta.UsageForModels(name)
 		} else if target, ok := ResolveTaskModelAlias(generation, name); ok {
 			if plugin, ok := generation.Get(target.PluginKey); ok {
-				entry.UsageSchema = plugin.Meta.UsageSchema
+				entry.UsageSchema, _ = plugin.Meta.UsageForModels(target.Declared, name)
 			}
 		}
 		result.Entries = append(result.Entries, entry)
@@ -232,10 +232,12 @@ func ValidateModelPricing(name string, values PricingValues) error {
 			generation := jsplugin.DefaultRegistry.Generation()
 			var err error
 			if plugin, ok := generation.GetByModel(name); ok {
-				err = billing_setting.SmokeTestTaskExpr(expression, plugin.Meta.UsageSchema)
+				schema, _ := plugin.Meta.UsageForModels(name)
+				err = billing_setting.SmokeTestTaskExpr(expression, schema)
 			} else if target, resolved := ResolveTaskModelAlias(generation, name); resolved {
 				if plugin, ok := generation.Get(target.PluginKey); ok {
-					err = billing_setting.SmokeTestTaskExpr(expression, plugin.Meta.UsageSchema)
+					schema, _ := plugin.Meta.UsageForModels(target.Declared, name)
+					err = billing_setting.SmokeTestTaskExpr(expression, schema)
 				} else {
 					err = billing_setting.SmokeTestExpr(expression)
 				}

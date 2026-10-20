@@ -113,7 +113,44 @@ export const meta = {
     { label: "H3 2K 5s · 9 images", facts: { seconds: 5, resolution: "2K", input_images: 9, input_video_seconds: 0 } },
     { label: "H3 2K 5s · input video", facts: { seconds: 5, resolution: "2K", input_images: 0, input_video_seconds: 15 } },
   ],
-// MiniMax request and response bodies, for clients and for a downstream New
+  usageProfiles: [
+    {
+      models: ["MiniMax-H3"],
+      schema: H3_USAGE_SCHEMA,
+      examples: [
+        { label: "H3 768P 5s", facts: { seconds: 5, resolution: "768P", input_images: 0, input_video_seconds: 0 } },
+        { label: "H3 2K 5s", facts: { seconds: 5, resolution: "2K", input_images: 0, input_video_seconds: 0 } },
+        { label: "H3 2K 5s · 9 images", facts: { seconds: 5, resolution: "2K", input_images: 9, input_video_seconds: 0 } },
+        { label: "H3 2K 5s · input video", facts: { seconds: 5, resolution: "2K", input_images: 0, input_video_seconds: 15 } },
+      ],
+    },
+    {
+      models: ["MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast"],
+      schema: HAILUO_23_USAGE_SCHEMA,
+      examples: [
+        { label: "2.3 768P 6s", facts: { seconds: 6, resolution: "768P" } },
+        { label: "2.3 768P 10s", facts: { seconds: 10, resolution: "768P" } },
+        { label: "2.3 1080P 6s", facts: { seconds: 6, resolution: "1080P" } },
+      ],
+    },
+    {
+      models: ["MiniMax-Hailuo-02"],
+      schema: HAILUO_02_USAGE_SCHEMA,
+      examples: [
+        { label: "02 512P 6s", facts: { seconds: 6, resolution: "512P" } },
+        { label: "02 512P 10s", facts: { seconds: 10, resolution: "512P" } },
+        { label: "02 768P 6s", facts: { seconds: 6, resolution: "768P" } },
+        { label: "02 768P 10s", facts: { seconds: 10, resolution: "768P" } },
+        { label: "02 1080P 6s", facts: { seconds: 6, resolution: "1080P" } },
+      ],
+    },
+    {
+      models: ["T2V-01-Director", "T2V-01", "I2V-01-Director", "I2V-01-live", "I2V-01", "S2V-01"],
+      schema: HAILUO_01_USAGE_SCHEMA,
+      examples: [{ label: "01-series 720P 6s", facts: { seconds: 6 } }],
+    },
+  ],
+  // MiniMax request and response bodies, for clients and for a downstream New
   // API gateway. The task id of a query is a path parameter on both versions,
   // where MiniMax /v1 reads it from the query string.
   routes: [

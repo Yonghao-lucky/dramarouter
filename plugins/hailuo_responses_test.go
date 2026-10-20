@@ -1,7 +1,9 @@
 package plugins_test
 
 import (
+	"maps"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -143,4 +145,39 @@ func TestHailuoH3SubmitsToV2(t *testing.T) {
 	body, err := common.Marshal(descriptor["body"])
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"model":"MiniMax-H3","content":[{"type":"text","text":"a boy playing basketball"}],"resolution":"768P","duration":5,"ratio":"16:9"}`, string(body))
+}
+
+// Each model family bills only the dimensions it renders, so MiniMax-H3 shows
+// its 768P/2K tiers and input media while the 01 series bills seconds alone.
+func TestHailuoUsageProfilesPerModel(t *testing.T) {
+	plugin := loadHailuoPlugin(t)
+	families := []struct {
+		models      []string
+		fields      []string
+		resolutions []string
+	}{
+		{[]string{"MiniMax-H3"}, []string{"input_images", "input_video_seconds", "resolution", "seconds"}, []string{"768P", "2K"}},
+		{[]string{"MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast"}, []string{"resolution", "seconds"}, []string{"768P", "1080P"}},
+		{[]string{"MiniMax-Hailuo-02"}, []string{"resolution", "seconds"}, []string{"512P", "768P", "1080P"}},
+		{[]string{"T2V-01-Director", "T2V-01", "I2V-01-Director", "I2V-01-live", "I2V-01", "S2V-01"}, []string{"seconds"}, nil},
+	}
+	profiled := make([]string, 0, len(plugin.Meta.Models))
+	for _, family := range families {
+		for _, name := range family.models {
+			profiled = append(profiled, name)
+			t.Run(name, func(t *testing.T) {
+				schema, examples := plugin.Meta.UsageForModels(name)
+				assert.Equal(t, family.fields, slices.Sorted(maps.Keys(schema)))
+				assert.Equal(t, family.resolutions, schema["resolution"].Enum)
+				assert.NotEmpty(t, examples)
+			})
+		}
+	}
+	assert.ElementsMatch(t, plugin.Meta.Models, profiled, "every declared model must select a usage profile")
+
+	// Lookup is case-insensitive and an undeclared model keeps the defaults.
+	schema, _ := plugin.Meta.UsageForModels("minimax-h3")
+	assert.Equal(t, []string{"768P", "2K"}, schema["resolution"].Enum)
+	schema, _ = plugin.Meta.UsageForModels("unknown-model")
+	assert.Equal(t, plugin.Meta.UsageSchema, schema)
 }

@@ -43,16 +43,24 @@ export type TaskUsageDraft = Record<
   Record<string, { price: string; free: string }>
 >
 
-export type TaskUsageTier = { key: string | null; values: string[] }
+export type TaskUsageTier = {
+  key: string | null
+  label: string
+  values: string[]
+}
 
 // Hailuo 这类插件把输出分辨率声明为枚举；缺失时退回单一档位。
-export function taskUsageTier(schema: BillingUsageSchema): TaskUsageTier {
+export function taskUsageTier(
+  schema: BillingUsageSchema,
+  language = 'en'
+): TaskUsageTier {
   for (const [key, field] of Object.entries(schema)) {
     if (field.enum && field.enum.length > 0) {
-      return { key, values: field.enum }
+      const label = resolveLocalizedText(field.description, language).trim()
+      return { key, label: label || key, values: field.enum }
     }
   }
-  return { key: null, values: ['base'] }
+  return { key: null, label: '', values: ['base'] }
 }
 
 export function taskUsageFields(
@@ -180,7 +188,6 @@ export function parseTaskUsageDraft(
   return draft
 }
 
-
 type TaskUsagePricingFieldsProps = {
   schema: BillingUsageSchema
   billingExpr: string
@@ -193,7 +200,10 @@ type TaskUsagePricingFieldsProps = {
  */
 export function TaskUsagePricingFields(props: TaskUsagePricingFieldsProps) {
   const { t, i18n } = useTranslation()
-  const tier = useMemo(() => taskUsageTier(props.schema), [props.schema])
+  const tier = useMemo(
+    () => taskUsageTier(props.schema, i18n.language),
+    [props.schema, i18n.language]
+  )
   const fields = useMemo(
     () => taskUsageFields(props.schema, i18n.language),
     [props.schema, i18n.language]
@@ -238,7 +248,7 @@ export function TaskUsagePricingFields(props: TaskUsagePricingFieldsProps) {
           className='bg-muted/30 space-y-3 rounded-md border p-3'
         >
           <h4 className='text-sm font-medium'>
-            {tier.key ? `${tier.key}: ${value}` : t('Base price')}
+            {tier.key ? `${tier.label}: ${value}` : t('Base price')}
           </h4>
           {fields.map((field) => {
             const row = draft[value]?.[field.key] ?? { price: '', free: '' }

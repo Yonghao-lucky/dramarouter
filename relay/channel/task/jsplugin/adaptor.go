@@ -83,6 +83,16 @@ type TaskAdaptor struct {
 }
 
 func New(plugin *pluginruntime.LoadedPlugin) *TaskAdaptor { return &TaskAdaptor{plugin: plugin} }
+
+// usageSchema is the billing schema of the model this request targets: the
+// upstream model first, then the client-facing one, then the plugin default.
+func (a *TaskAdaptor) usageSchema() map[string]pluginruntime.UsageFieldSchema {
+	if a.info == nil {
+		return a.plugin.Meta.UsageSchema
+	}
+	schema, _ := a.plugin.Meta.UsageForModels(a.info.UpstreamModelName, a.info.OriginModelName)
+	return schema
+}
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo)   { a.info = info }
 
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
@@ -1182,7 +1192,7 @@ func (a *TaskAdaptor) validateResolvedUsageValue(value any) error {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, item := range typed {
-			if schema, declared := a.plugin.Meta.UsageSchema[key]; declared {
+			if schema, declared := a.usageSchema()[key]; declared {
 				if _, err := validateUsageValue(item, schema, true); err != nil {
 					return err
 				}
@@ -1208,7 +1218,7 @@ func (a *TaskAdaptor) validateResolvedUsageValue(value any) error {
 func (a *TaskAdaptor) validatedUsageRatios(facts map[string]any) (map[string]float64, error) {
 	ratios := make(map[string]float64)
 	for key, value := range facts {
-		if schema, declared := a.plugin.Meta.UsageSchema[key]; declared {
+		if schema, declared := a.usageSchema()[key]; declared {
 			number, err := validateUsageValue(value, schema, false)
 			if err != nil {
 				return nil, err
@@ -1253,7 +1263,7 @@ func (a *TaskAdaptor) validatedCompletionUsageFacts(facts any) (map[string]any, 
 	validated := make(map[string]any, len(values))
 	for key, value := range values {
 		validated[key] = value
-		if schema, declared := a.plugin.Meta.UsageSchema[key]; declared {
+		if schema, declared := a.usageSchema()[key]; declared {
 			number, err := validateUsageValue(value, schema, false)
 			if err != nil {
 				return nil, err
