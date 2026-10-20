@@ -35,6 +35,15 @@ export const apiKeySchema = z.object({
   accessed_time: z.number(),
   group: z.string().nullish().default(''),
   auto_groups: z.array(z.string()).nullish().default(null),
+  vendor_auto_groups: z
+    .array(
+      z.object({
+        vendor_id: z.number(),
+        groups: z.array(z.string()),
+      })
+    )
+    .nullish()
+    .default(null),
   cross_group_retry: z
     .preprocess((v) => {
       if (v === 1) return true
@@ -83,6 +92,11 @@ export interface SearchApiKeysParams {
   size?: number
 }
 
+export type VendorAutoGroupOrder = {
+  vendor_id: number
+  groups: string[]
+}
+
 export interface ApiKeyFormData {
   name: string
   remain_quota: number
@@ -93,6 +107,7 @@ export interface ApiKeyFormData {
   allow_ips: string
   group: string
   auto_groups: string[]
+  vendor_auto_groups: VendorAutoGroupOrder[]
   cross_group_retry: boolean
 }
 

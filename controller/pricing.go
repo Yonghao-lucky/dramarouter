@@ -47,10 +47,8 @@ func GetPricing(c *gin.Context) {
 		if err == nil {
 			group = user.Group
 			for g := range groupRatio {
-				ratio, ok := ratio_setting.GetGroupGroupRatio(group, g)
-				if ok {
-					groupRatio[g] = ratio
-				}
+				// One resolver for display and charge: reseller prices included.
+				groupRatio[g] = service.GetUserGroupRatio(userId.(int), group, g)
 			}
 		}
 	}

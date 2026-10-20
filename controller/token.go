@@ -32,14 +32,30 @@ func (input *tokenAutoGroupsInput) UnmarshalJSON(data []byte) error {
 	return common.Unmarshal(data, &input.Groups)
 }
 
+type tokenVendorAutoGroupsInput struct {
+	Set    bool
+	Orders []model.VendorAutoGroupOrder
+}
+
+func (input *tokenVendorAutoGroupsInput) UnmarshalJSON(data []byte) error {
+	input.Set = true
+	if strings.TrimSpace(string(data)) == "null" {
+		input.Orders = nil
+		return nil
+	}
+	return common.Unmarshal(data, &input.Orders)
+}
+
 type tokenRequest struct {
 	model.Token
-	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
+	AutoGroups       tokenAutoGroupsInput       `json:"auto_groups"`
+	VendorAutoGroups tokenVendorAutoGroupsInput `json:"vendor_auto_groups"`
 }
 
 type tokenResponse struct {
 	*model.Token
-	AutoGroups []string `json:"auto_groups"`
+	AutoGroups       []string                     `json:"auto_groups"`
+	VendorAutoGroups []model.VendorAutoGroupOrder `json:"vendor_auto_groups"`
 }
 
 func maxTokenQuota() int {
@@ -66,7 +82,15 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if len(autoGroups) == 0 {
 		autoGroups = nil
 	}
-	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups}
+	vendorOrders, err := token.GetVendorAutoGroups()
+	if err != nil {
+		common.SysError(fmt.Sprintf("failed to parse vendor auto groups for token %d: %v", token.Id, err))
+		vendorOrders = nil
+	}
+	if len(vendorOrders) == 0 {
+		vendorOrders = nil
+	}
+	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups, VendorAutoGroups: vendorOrders}
 }
 
 func buildMaskedTokenResponses(tokens []*model.Token) []*tokenResponse {
@@ -121,6 +145,78 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 	}
 
 	if err := token.SetAutoGroups(groups); err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	return true
+}
+
+// maxTokenVendorAutoGroups 限制单个 Key 可配置的厂商数量，避免 JSON 列无界增长。
+const maxTokenVendorAutoGroups = 32
+
+func setTokenVendorAutoGroups(c *gin.Context, token *model.Token, orders []model.VendorAutoGroupOrder) bool {
+	if len(orders) == 0 {
+		if err := token.SetVendorAutoGroups(nil); err != nil {
+			common.ApiError(c, err)
+			return false
+		}
+		return true
+	}
+
+	if len(orders) > maxTokenVendorAutoGroups {
+		common.ApiError(c, fmt.Errorf("单个令牌最多配置 %d 个模型厂商的分组顺序", maxTokenVendorAutoGroups))
+		return false
+	}
+
+	maxCount := setting.GetMaxTokenAutoGroups()
+	userGroup, err := getTokenRequestUserGroup(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+
+	seenVendors := make(map[int]struct{}, len(orders))
+	normalized := make([]model.VendorAutoGroupOrder, 0, len(orders))
+	for _, order := range orders {
+		if order.VendorId <= 0 {
+			common.ApiError(c, fmt.Errorf("模型厂商无效"))
+			return false
+		}
+		if _, ok := seenVendors[order.VendorId]; ok {
+			common.ApiError(c, fmt.Errorf("模型厂商 %d 的分组顺序重复", order.VendorId))
+			return false
+		}
+		seenVendors[order.VendorId] = struct{}{}
+		if _, err := model.GetVendorByID(order.VendorId); err != nil {
+			common.ApiError(c, fmt.Errorf("模型厂商 %d 不存在", order.VendorId))
+			return false
+		}
+		if len(order.Groups) == 0 || len(order.Groups) > maxCount {
+			common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsTooMany, map[string]any{"Max": maxCount})
+			return false
+		}
+
+		seenGroups := make(map[string]struct{}, len(order.Groups))
+		groups := make([]string, 0, len(order.Groups))
+		for _, group := range order.Groups {
+			if _, ok := seenGroups[group]; ok {
+				common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsDuplicate, map[string]any{"Group": group})
+				return false
+			}
+			seenGroups[group] = struct{}{}
+			if !service.IsUserSelectableGroup(userGroup, group) {
+				common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsInvalid, map[string]any{"Group": group})
+				return false
+			}
+			groups = append(groups, group)
+		}
+		normalized = append(normalized, model.VendorAutoGroupOrder{
+			VendorId: order.VendorId,
+			Groups:   groups,
+		})
+	}
+
+	if err := token.SetVendorAutoGroups(normalized); err != nil {
 		common.ApiError(c, err)
 		return false
 	}
@@ -314,9 +410,13 @@ func AddToken(c *gin.Context) {
 		if !setTokenAutoGroups(c, &token, request.AutoGroups.Groups) {
 			return
 		}
+		if !setTokenVendorAutoGroups(c, &token, request.VendorAutoGroups.Orders) {
+			return
+		}
 	} else {
 		token.CrossGroupRetry = false
 		_ = token.SetAutoGroups(nil)
+		_ = token.SetVendorAutoGroups(nil)
 	}
 	key, err := common.GenerateKey()
 	if err != nil {
@@ -339,6 +439,7 @@ func AddToken(c *gin.Context) {
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
 		AutoGroups:         token.AutoGroups,
+		VendorAutoGroups:   token.VendorAutoGroups,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -421,8 +522,14 @@ func UpdateToken(c *gin.Context) {
 		if token.Group != "auto" {
 			cleanToken.CrossGroupRetry = false
 			_ = cleanToken.SetAutoGroups(nil)
+			_ = cleanToken.SetVendorAutoGroups(nil)
 		} else if request.AutoGroups.Set {
 			if !setTokenAutoGroups(c, cleanToken, request.AutoGroups.Groups) {
+				return
+			}
+		}
+		if token.Group == "auto" && request.VendorAutoGroups.Set {
+			if !setTokenVendorAutoGroups(c, cleanToken, request.VendorAutoGroups.Orders) {
 				return
 			}
 		}

@@ -35,6 +35,7 @@ type Pricing struct {
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
+	PeakPricing            *ratio_setting.PeakPricingView `json:"peak_pricing,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
 }
 
@@ -55,6 +56,7 @@ var (
 	// 缓存映射：模型名 -> 启用分组 / 计费类型
 	modelEnableGroups     = make(map[string][]string)
 	modelQuotaTypeMap     = make(map[string]int)
+	modelVendorIDMap      = make(map[string]int)
 	modelEnableGroupsLock = sync.RWMutex{}
 )
 
@@ -93,6 +95,20 @@ func GetVendors() []PricingVendor {
 		GetPricing()
 	}
 	return vendorsList
+}
+
+// GetModelVendorID 返回模型所属的厂商 ID；模型未登记厂商时返回 0。
+// 数据来自定价缓存，随 updatePricing 每分钟刷新。
+func GetModelVendorID(modelName string) int {
+	if modelName == "" {
+		return 0
+	}
+	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
+		GetPricing()
+	}
+	modelEnableGroupsLock.RLock()
+	defer modelEnableGroupsLock.RUnlock()
+	return modelVendorIDMap[modelName]
 }
 
 func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
@@ -406,6 +422,7 @@ func updatePricing() {
 				pricing.BillingExpr = expr
 			}
 		}
+		pricing.PeakPricing = ratio_setting.GetModelPeakPricingView(model, time.Now())
 		pricingMap = append(pricingMap, pricing)
 	}
 
@@ -418,9 +435,13 @@ func updatePricing() {
 	modelEnableGroupsLock.Lock()
 	modelEnableGroups = make(map[string][]string)
 	modelQuotaTypeMap = make(map[string]int)
+	modelVendorIDMap = make(map[string]int)
 	for _, p := range pricingMap {
 		modelEnableGroups[p.ModelName] = p.EnableGroup
 		modelQuotaTypeMap[p.ModelName] = p.QuotaType
+		if p.VendorID > 0 {
+			modelVendorIDMap[p.ModelName] = p.VendorID
+		}
 	}
 	modelEnableGroupsLock.Unlock()
 

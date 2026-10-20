@@ -354,26 +354,27 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	// 获取用户和组的倍率信息
-	group := task.Group
-	if group == "" {
-		user, err := model.GetUserById(task.UserId, false)
-		if err == nil {
-			group = user.Group
+	// The ratio charged at submit time is frozen in the billing context. Relying
+	// on it is both correct for user-specific prices (including reseller retail)
+	// and immune to a group-ratio change between submit and settlement.
+	// Previously this recomputed GetGroupGroupRatio(group, group), a self-mapping
+	// that can never match a real (UserGroup, UsingGroup) override.
+	finalGroupRatio := 0.0
+	if billingContext := task.PrivateData.BillingContext; billingContext != nil {
+		finalGroupRatio = billingContext.GroupRatio
+	}
+	if finalGroupRatio <= 0 {
+		group := task.Group
+		if group == "" {
+			user, err := model.GetUserById(task.UserId, false)
+			if err == nil {
+				group = user.Group
+			}
 		}
-	}
-	if group == "" {
-		return
-	}
-
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-	var finalGroupRatio float64
-	if hasUserGroupRatio {
-		finalGroupRatio = userGroupRatio
-	} else {
-		finalGroupRatio = groupRatio
+		if group == "" {
+			return
+		}
+		finalGroupRatio = ratio_setting.GetGroupRatio(group)
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）

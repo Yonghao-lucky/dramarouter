@@ -35,6 +35,8 @@ import {
   User,
   Users,
   Wallet,
+  UsersRound,
+  Building2,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -125,6 +127,11 @@ export function useSidebarData(): SidebarData {
             url: '/wallet',
             icon: Wallet,
           },
+          {
+            title: t('Reseller console'),
+            url: '/reseller',
+            icon: UsersRound,
+          },
         ],
       },
       {
@@ -156,6 +163,12 @@ export function useSidebarData(): SidebarData {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
+          },
+          {
+            title: t('Reseller management'),
+            url: '/reseller-admin',
+            icon: Building2,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Subscriptions'),

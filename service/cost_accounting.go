@@ -29,6 +29,7 @@ func buildCostAccountingInput(relayInfo *relaycommon.RelayInfo, saleQuota int) *
 		relayInfo.CostDiscount,
 	)
 	noteQuotaClamp(relayInfo, clamp)
+	attachResellerEvidence(input, relayInfo.ResellerOwnerID, relayInfo.ResellerRetailRatio, relayInfo.ResellerCostRatio, relayInfo.ResellerPath, int64(saleQuota), relayInfo.PriceData.GroupRatioInfo.GroupRatio)
 	return input
 }
 
@@ -47,7 +48,35 @@ func buildTaskCostAccountingInput(task *model.Task, logType int, saleQuota int) 
 		return nil
 	}
 	billingContext := task.PrivateData.BillingContext
-	return buildSaleCostAccountingInput(logType, saleQuota, billingContext.GroupRatio, billingContext.CostDiscount)
+	input := buildSaleCostAccountingInput(logType, saleQuota, billingContext.GroupRatio, billingContext.CostDiscount)
+	signedQuota := int64(saleQuota)
+	if logType == model.LogTypeRefund {
+		signedQuota = -signedQuota
+	}
+	attachResellerEvidence(input, billingContext.ResellerOwnerID, billingContext.ResellerRetailRatio, billingContext.ResellerCostRatio, billingContext.ResellerPath, signedQuota, billingContext.GroupRatio)
+	return input
+}
+
+// attachResellerEvidence freezes who earns the margin on this charge and how the
+// request was funded. The margin uses the same sign as the charge, so a refund
+// records a negative margin and the daily rollup nets out naturally.
+func attachResellerEvidence(input *model.CostAccountingInput, ownerID int, retailRatio, costRatio float64, path string, signedRetailQuota int64, effectiveRatio float64) {
+	if input == nil || ownerID <= 0 || retailRatio <= 0 || costRatio <= 0 {
+		return
+	}
+	settlement := path
+	if settlement == "" {
+		settlement = "self"
+	}
+	ratio := effectiveRatio
+	if ratio <= 0 {
+		ratio = retailRatio
+	}
+	input.OwnerID = ownerID
+	input.RetailRatio = decimal.NewFromFloat(retailRatio).String()
+	input.ResellerCostRatio = decimal.NewFromFloat(costRatio).String()
+	input.ResellerMarginQuota = model.ResellerMarginQuota(signedRetailQuota, ratio, costRatio)
+	input.ResellerSettlement = settlement
 }
 
 func buildSaleCostAccountingInput(logType int, saleQuota int, billingDiscount float64, costDiscount string) *model.CostAccountingInput {

@@ -24,6 +24,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { LongText } from '@/components/long-text'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
+import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Tooltip,
@@ -42,7 +43,9 @@ import type { User } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 import { UserQuotaCell } from './user-quota-cell'
 
-export function useUsersColumns(): ColumnDef<User>[] {
+export function useUsersColumns(
+  resellerUserIds: ReadonlySet<number> = new Set<number>()
+): ColumnDef<User>[] {
   const { t } = useTranslation()
   return [
     {
@@ -217,6 +220,21 @@ export function useUsersColumns(): ColumnDef<User>[] {
       enableSorting: false,
       size: 120,
       meta: { mobileOrder: 20 },
+    },
+    {
+      id: 'reseller',
+      header: t('Reseller'),
+      cell: ({ row }) => {
+        // Reseller status is a capability row, not a role or group, so it is
+        // shown as its own marker next to the role.
+        if (!resellerUserIds.has(row.original.id)) {
+          return <span className='text-muted-foreground text-xs'>-</span>
+        }
+        return <Badge>{t('Reseller')}</Badge>
+      },
+      enableSorting: false,
+      size: 100,
+      meta: { mobileOrder: 21 },
     },
     {
       id: 'invite_info',

@@ -56,6 +56,8 @@ export type PricingModel = {
   billing_expr?: string
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
+  /** Peak / off-peak windows currently in effect for this model */
+  peak_pricing?: PeakPricingView
   /**
    * Optional model metadata fields reserved for backend-provided catalog data.
    * Keep them data-driven; do not synthesize display values on the client.
@@ -87,6 +89,26 @@ export type ModelCapability =
   | 'code_interpreter'
   | 'caching'
   | 'embeddings'
+
+export type PeakPricingWindow = {
+  name: string
+  days: number[]
+  start: string
+  end: string
+  input_factor: number
+  output_factor: number
+  cache_factor: number
+  cache_write_factor: number
+  cache_write_5m_factor?: number
+  cache_write_1h_factor?: number
+}
+
+export type PeakPricingView = {
+  timezone: string
+  source: 'model' | 'global' | string
+  windows: PeakPricingWindow[]
+  off_peak: PeakPricingWindow
+}
 
 export type PricingData = {
   success: boolean

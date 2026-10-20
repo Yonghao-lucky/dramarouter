@@ -106,6 +106,57 @@ func GetRequestAutoGroups(c *gin.Context, userGroup string) []string {
 	return FilterUserTokenAutoGroups(userGroup, groups)
 }
 
+// GetRequestVendorGroups resolves the ordered Auto groups for the requested
+// model. A token may pin a different order per model vendor, because one group
+// can serve models from several vendors. Vendors without a configured order
+// fall back to the token's Auto list; when that list is empty too, the union of
+// all configured vendor routes keeps the key usable.
+func GetRequestVendorGroups(c *gin.Context, userGroup string, modelName string) []string {
+	fallback := GetRequestAutoGroups(c, userGroup)
+	value, ok := common.GetContextKey(c, constant.ContextKeyTokenVendorAutoGroups)
+	if !ok {
+		return fallback
+	}
+	orders, ok := value.([]model.VendorAutoGroupOrder)
+	if !ok || len(orders) == 0 {
+		return fallback
+	}
+	resolveFallback := func() []string {
+		if len(fallback) > 0 {
+			return fallback
+		}
+		// 只配置了厂商顺序的 Key：用全部厂商线路的并集兜底，避免其他厂商无路可走。
+		union := make([]string, 0, len(orders))
+		seen := make(map[string]struct{}, len(orders))
+		for _, order := range orders {
+			for _, group := range order.Groups {
+				if _, exists := seen[group]; exists {
+					continue
+				}
+				seen[group] = struct{}{}
+				union = append(union, group)
+			}
+		}
+		return FilterUserTokenAutoGroups(userGroup, union)
+	}
+
+	vendorID := model.GetModelVendorID(modelName)
+	if vendorID <= 0 {
+		return resolveFallback()
+	}
+	for _, order := range orders {
+		if order.VendorId != vendorID {
+			continue
+		}
+		groups := FilterUserTokenAutoGroups(userGroup, order.Groups)
+		if len(groups) > 0 {
+			return groups
+		}
+		return resolveFallback()
+	}
+	return resolveFallback()
+}
+
 // GetGroupsEnabledModels 按 groups 顺序获取各分组启用的模型并去重
 func GetGroupsEnabledModels(groups []string) []string {
 	seen := make(map[string]struct{})
@@ -124,10 +175,17 @@ func GetGroupsEnabledModels(groups []string) []string {
 // GetUserGroupRatio 获取用户使用某个分组的倍率
 // userGroup 用户分组
 // group 需要获取倍率的分组
-func GetUserGroupRatio(userGroup, group string) float64 {
-	ratio, ok := ratio_setting.GetGroupGroupRatio(userGroup, group)
-	if ok {
-		return ratio
+func GetUserGroupRatio(userID int, userGroup, group string) float64 {
+	base := ratio_setting.GetGroupRatio(group)
+	if override, ok := ratio_setting.GetGroupGroupRatio(userGroup, group); ok {
+		base = override
 	}
-	return ratio_setting.GetGroupRatio(group)
+	// Reseller prices must be visible wherever the ratio is displayed, otherwise
+	// the pricing page and the actual charge drift apart.
+	pricing, err := model.ResolveResellerPricing(userID, group)
+	if err != nil {
+		common.SysError("failed to resolve reseller pricing: " + err.Error())
+		return base
+	}
+	return pricing.EffectiveRatio(base)
 }

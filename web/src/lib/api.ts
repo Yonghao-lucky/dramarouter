@@ -63,6 +63,23 @@ export async function getUserGroups(): Promise<{
   return res.data
 }
 
+export type VendorGroupCatalogEntry = {
+  id: number
+  name: string
+  icon?: string
+  groups: { name: string; ratio: number; model_count: number }[]
+}
+
+export async function getUserVendorGroups(): Promise<{
+  success: boolean
+  message?: string
+  data?: VendorGroupCatalogEntry[]
+  max_count?: number
+}> {
+  const res = await api.get('/api/user/self/vendor-groups')
+  return res.data
+}
+
 // ============================================================================
 // System APIs
 // ============================================================================

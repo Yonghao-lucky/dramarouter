@@ -13,6 +13,17 @@ type GroupRatioInfo struct {
 	HasSpecialRatio   bool
 }
 
+// PeakPricingInfo 记录本次请求生效的峰谷系数，供日志与排查使用。
+type PeakPricingInfo struct {
+	RuleName     string
+	Input        float64
+	Output       float64
+	Cache        float64
+	CacheWrite   float64
+	CacheWrite5m float64
+	CacheWrite1h float64
+}
+
 type PriceData struct {
 	FreeModel            bool
 	ModelPrice           float64
@@ -30,6 +41,7 @@ type PriceData struct {
 	Quota                int // 按次计费的最终额度（MJ / Task）
 	QuotaToPreConsume    int // 按量计费的预消耗额度
 	GroupRatioInfo       GroupRatioInfo
+	PeakPricing          *PeakPricingInfo
 }
 
 func (p *PriceData) AddOtherRatio(key string, ratio float64) {

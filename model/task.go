@@ -166,6 +166,11 @@ type TaskBillingContext struct {
 	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	CostDiscount    string             `json:"cost_discount,omitempty"`     // 提交时渠道成本折扣快照
+	// 经销商结算快照：提交时冻结，轮询结算阶段据此写入利润证据。
+	ResellerOwnerID     int     `json:"reseller_owner_id,omitempty"`
+	ResellerRetailRatio float64 `json:"reseller_retail_ratio,omitempty"`
+	ResellerCostRatio   float64 `json:"reseller_cost_ratio,omitempty"`
+	ResellerPath        string  `json:"reseller_path,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）

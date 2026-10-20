@@ -22,7 +22,11 @@ import { z } from 'zod'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import { DEFAULT_GROUP } from '../constants'
-import type { ApiKey, ApiKeyFormData } from '../types'
+import type {
+  ApiKey,
+  ApiKeyFormData,
+  VendorAutoGroupOrder,
+} from '../types'
 
 // ============================================================================
 // Form Schema
@@ -43,14 +47,24 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       group: z.string().optional(),
       auto_groups_mode: z.enum(['inherit', 'custom']),
       auto_groups: z.array(z.string()),
+      vendor_auto_groups: z.array(
+        z.object({
+          vendor_id: z.number(),
+          groups: z.array(z.string()),
+        })
+      ),
       cross_group_retry: z.boolean().optional(),
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
       if (data.group === 'auto') {
+        const hasVendorOrders = data.vendor_auto_groups.some(
+          (order) => order.groups.length > 0
+        )
         if (
           data.auto_groups_mode === 'custom' &&
-          data.auto_groups.length === 0
+          data.auto_groups.length === 0 &&
+          !hasVendorOrders
         ) {
           ctx.addIssue({
             code: 'custom',
@@ -113,6 +127,7 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   group: DEFAULT_GROUP,
   auto_groups_mode: 'inherit',
   auto_groups: [],
+  vendor_auto_groups: [],
   cross_group_retry: true,
   tokenCount: 1,
 }
@@ -156,8 +171,38 @@ export function transformFormDataToPayload(
       data.group === 'auto' && data.auto_groups_mode === 'custom'
         ? data.auto_groups
         : [],
+    vendor_auto_groups:
+      data.group === 'auto'
+        ? data.vendor_auto_groups
+            .filter((order) => order.groups.length > 0)
+            .map((order) => ({
+              vendor_id: order.vendor_id,
+              groups: order.groups,
+            }))
+        : [],
     cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
   }
+}
+
+function normalizeStoredVendorOrders(
+  orders: VendorAutoGroupOrder[],
+  availableGroups: Set<string>,
+  maxAutoGroups: number
+): VendorAutoGroupOrder[] {
+  const limit = Number.isInteger(maxAutoGroups) && maxAutoGroups > 0 ? maxAutoGroups : 5
+  const seenVendors = new Set<number>()
+  return orders.flatMap((order) => {
+    if (!order || !Number.isInteger(order.vendor_id) || order.vendor_id <= 0) {
+      return []
+    }
+    if (seenVendors.has(order.vendor_id)) return []
+    const groups = (order.groups ?? [])
+      .filter((group) => availableGroups.has(group))
+      .slice(0, limit)
+    if (groups.length === 0) return []
+    seenVendors.add(order.vendor_id)
+    return [{ vendor_id: order.vendor_id, groups }]
+  })
 }
 
 /**
@@ -192,6 +237,11 @@ export function transformApiKeyToFormDefaults(
     group: apiKey.group || DEFAULT_GROUP,
     auto_groups_mode: autoGroupsMode,
     auto_groups: autoGroups,
+    vendor_auto_groups: normalizeStoredVendorOrders(
+      apiKey.vendor_auto_groups ?? [],
+      availableSet,
+      maxAutoGroups
+    ),
     cross_group_retry: !!apiKey.cross_group_retry,
     tokenCount: 1,
   }

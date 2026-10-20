@@ -29,6 +29,7 @@ import {
   DataTablePage,
   useDataTable,
 } from '@/components/data-table'
+import { api } from '@/lib/api'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 
@@ -61,7 +62,24 @@ function isDisabledUserRow(user: User) {
 
 export function UsersTable() {
   const { t } = useTranslation()
-  const columns = useUsersColumns()
+  // Reseller status comes from the capability table, so the users list needs one
+  // small admin lookup to mark which accounts are resellers.
+  const resellers = useQuery({
+    queryKey: ['users', 'reseller-ids'],
+    queryFn: async () => {
+      try {
+        const response = await api.get('/api/user/reseller/profiles')
+        return new Set<number>(
+          (response.data?.data ?? []).map((item: { user_id: number }) => item.user_id)
+        )
+      } catch {
+        return new Set<number>()
+      }
+    },
+    staleTime: 60_000,
+    retry: false,
+  })
+  const columns = useUsersColumns(resellers.data)
   const { refreshTrigger } = useUsers()
   const isMobile = useMediaQuery('(max-width: 640px)')
   const [sorting, setSorting] = useState<SortingState>([])

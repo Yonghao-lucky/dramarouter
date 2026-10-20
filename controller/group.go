@@ -33,12 +33,15 @@ func GetUserGroups(c *gin.Context) {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
 			usableGroups[groupName] = map[string]interface{}{
-				"ratio": service.GetUserGroupRatio(userGroup, groupName),
+				"ratio": service.GetUserGroupRatio(userId, userGroup, groupName),
 				"desc":  desc,
 			}
 		}
 	}
-	if _, ok := userUsableGroups["auto"]; ok {
+	// auto 是聚合 Key 的专用分组，不是真实分组倍率，因此不在 GroupRatio 里。
+	// 只要该用户有可用的 Auto 分组，就把它作为选项返回，否则客户端建不出聚合 Key。
+	autoGroups := service.GetUserAutoGroup(userGroup)
+	if _, explicitlyConfigured := userUsableGroups["auto"]; explicitlyConfigured || len(autoGroups) > 0 {
 		usableGroups["auto"] = map[string]interface{}{
 			"ratio": "自动",
 			"desc":  setting.GetUsableGroupDescription("auto"),

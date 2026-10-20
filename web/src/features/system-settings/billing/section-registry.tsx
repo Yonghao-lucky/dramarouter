@@ -22,6 +22,7 @@ import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
+import { PeakPricingSection } from '../models/peak-pricing-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
@@ -127,6 +128,13 @@ const BILLING_SECTIONS = [
         toolPricesDefault={settings['tool_price_setting.prices']}
         visibleTabs={['groups']}
       />
+    ),
+  },
+  {
+    id: 'peak-pricing',
+    titleKey: 'Peak & Off-peak Pricing',
+    build: (settings: BillingSettings) => (
+      <PeakPricingSection defaultValue={settings.PeakPricing} />
     ),
   },
   {

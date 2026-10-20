@@ -38,6 +38,9 @@ func TestMain(m *testing.M) {
 		&BillingAccount{}, &BillingAccountEvent{}, &BillingOperation{}, &BillingEntry{}, &BillingHour{}, &BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{},
 		&BillingCorrection{}, &BillingCorrectionRow{}, &BillingCorrectionClaim{},
 		&CostAccountingSnapshot{}, &CostAccountingAdjustment{},
+		&ResellerProfile{}, &ResellerGroupCost{}, &ResellerDefaultPrice{},
+		&CustomerGroupPrice{}, &ResellerCustomerBinding{}, &ResellerCustomerEvent{},
+		&ResellerCustomerAllocation{}, &ResellerMarginsDaily{}, &ResellerAllocationReservation{}, &ResellerMarginCreditCursor{},
 		&Task{}, &AssetWebhookEndpoint{}, &AssetWebhookDelivery{},
 		&TaskRequestBody{},
 		&User{},
@@ -73,7 +76,7 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		for _, table := range []string{"billing_accounts", "billing_account_events", "billing_operations", "billing_entries", "billing_hours", "billing_statements", "billing_statement_events", "billing_artifacts", "billing_history_imports", "cost_accounting_adjustments", "cost_accounting_snapshots", "billing_corrections", "billing_correction_rows", "billing_correction_claims"} {
+		for _, table := range []string{"billing_accounts", "billing_account_events", "billing_operations", "billing_entries", "billing_hours", "billing_statements", "billing_statement_events", "billing_artifacts", "billing_history_imports", "cost_accounting_adjustments", "cost_accounting_snapshots", "billing_corrections", "billing_correction_rows", "billing_correction_claims", "reseller_profiles", "reseller_group_costs", "reseller_default_prices", "customer_group_prices", "reseller_customer_bindings", "reseller_customer_events", "reseller_customer_allocations", "reseller_margins_daily", "reseller_allocation_reservations", "reseller_margin_credit_cursors"} {
 			DB.Exec("DELETE FROM " + table)
 		}
 		DB.Exec("DELETE FROM tasks")

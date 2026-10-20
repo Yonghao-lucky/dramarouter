@@ -67,7 +67,43 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 	}
 
+	// Reseller layer: a customer-specific or reseller-default retail price wins
+	// over both group ratios, and carries the wholesale ratios needed downstream
+	// for pool funding and frozen margin evidence.
+	applyResellerPricing(relayInfo, &groupRatioInfo)
+
 	return groupRatioInfo
+}
+
+// applyResellerPricing overrides the resolved group ratio when the customer has
+// a configured reseller price for this billing group.
+func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *hosttypes.GroupRatioInfo) {
+	relayInfo.ResellerOwnerID = 0
+	relayInfo.ResellerPath = ""
+	relayInfo.ResellerCostRatio = 0
+	relayInfo.ResellerRetailRatio = 0
+	if relayInfo.UserId <= 0 || relayInfo.UsingGroup == "" {
+		return
+	}
+	pricing, err := model.ResolveResellerPricing(relayInfo.UserId, relayInfo.UsingGroup)
+	if err != nil {
+		logger.LogError(nil, "failed to resolve reseller pricing: "+err.Error())
+		return
+	}
+	if !pricing.Override {
+		return
+	}
+	groupRatioInfo.GroupSpecialRatio = pricing.Retail
+	groupRatioInfo.GroupRatio = pricing.Retail
+	groupRatioInfo.HasSpecialRatio = true
+	relayInfo.ResellerOwnerID = pricing.OwnerID
+	relayInfo.ResellerRetailRatio = pricing.Retail
+	relayInfo.ResellerCostRatio = pricing.CostRatio
+	if pricing.OwnerID > 0 && pricing.CostRatio > 0 {
+		relayInfo.ResellerPath = "pool"
+	} else {
+		relayInfo.ResellerPath = "self"
+	}
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (hosttypes.PriceData, error) {
@@ -91,6 +127,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	var audioRatio float64
 	var audioCompletionRatio float64
 	var freeModel bool
+	var peakPricingInfo *hosttypes.PeakPricingInfo
 	if !usePrice {
 		preConsumedTokens := common.Max(promptTokens, common.PreConsumedQuota)
 		if meta.MaxTokens != 0 {
@@ -117,6 +154,29 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		imageRatio, _ = ratio_setting.GetImageRatio(info.OriginModelName)
 		audioRatio = ratio_setting.GetAudioRatio(info.OriginModelName)
 		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(info.OriginModelName)
+
+		// 峰谷系数在请求开始时求值一次：输入倍率乘在模型倍率上，
+		// 输出 / 缓存以「相对输入价」的形式折算，保证三类 token 各自独立定价。
+		peakFactors := ratio_setting.GetPeakFactors(info.OriginModelName, info.StartTime)
+		if !peakFactors.IsNeutral() {
+			modelRatio = modelRatio * peakFactors.Input
+			completionRatio = completionRatio * peakFactors.Output / peakFactors.Input
+			cacheRatio = cacheRatio * peakFactors.Cache / peakFactors.Input
+			cacheCreationRatio = cacheCreationRatio * peakFactors.CacheWrite / peakFactors.Input
+			cacheCreationRatio5m = cacheCreationRatio5m * peakFactors.CacheWrite5m / peakFactors.Input
+			cacheCreationRatio1h = cacheCreationRatio1h * peakFactors.CacheWrite1h / peakFactors.Input
+			audioCompletionRatio = audioCompletionRatio * peakFactors.Output / peakFactors.Input
+			peakPricingInfo = &hosttypes.PeakPricingInfo{
+				RuleName:     peakFactors.RuleName,
+				Input:        peakFactors.Input,
+				Output:       peakFactors.Output,
+				Cache:        peakFactors.Cache,
+				CacheWrite:   peakFactors.CacheWrite,
+				CacheWrite5m: peakFactors.CacheWrite5m,
+				CacheWrite1h: peakFactors.CacheWrite1h,
+			}
+		}
+
 		ratio := modelRatio * groupRatioInfo.GroupRatio
 		quota, err := common.QuotaFromFloatStrict(float64(preConsumedTokens) * ratio)
 		if err != nil {
@@ -163,6 +223,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		CacheCreation5mRatio: cacheCreationRatio5m,
 		CacheCreation1hRatio: cacheCreationRatio1h,
 		QuotaToPreConsume:    preConsumedQuota,
+		PeakPricing:          peakPricingInfo,
 	}
 	if usePrice {
 		for name, ratio := range meta.BillingRatios {

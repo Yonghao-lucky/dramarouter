@@ -1,0 +1,172 @@
+package model
+
+import (
+	"errors"
+	"strconv"
+	"strings"
+
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+// GetResellerProfileByUser returns the profile bound to a platform user, or nil
+// when the user is not a reseller.
+func GetResellerProfileByUser(userId int) (*ResellerProfile, error) {
+	var profile ResellerProfile
+	err := DB.Where("user_id = ?", userId).First(&profile).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &profile, nil
+}
+
+// UpsertResellerProfile grants or updates the reseller capability. status 0
+// keeps the existing value; a new profile defaults to enabled.
+func UpsertResellerProfile(userId int, name, code string, status int) (*ResellerProfile, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid reseller user")
+	}
+	if IsAdmin(userId) {
+		return nil, errors.New("administrator accounts cannot be resellers")
+	}
+	now := common.GetTimestamp()
+	profile := ResellerProfile{UserId: userId}
+	err := DB.Where("user_id = ?", userId).First(&profile).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if status == 0 {
+			status = ResellerStatusEnabled
+		}
+		profile = ResellerProfile{UserId: userId, Name: name, Code: code, Status: status, CreatedAt: now, UpdatedAt: now}
+		return &profile, DB.Create(&profile).Error
+	}
+	if err != nil {
+		return nil, err
+	}
+	if name != "" {
+		profile.Name = name
+	}
+	if code != "" {
+		profile.Code = code
+	}
+	if status != 0 {
+		profile.Status = status
+	}
+	profile.UpdatedAt = now
+	return &profile, DB.Model(&profile).Updates(map[string]any{
+		"name":       profile.Name,
+		"code":       profile.Code,
+		"status":     profile.Status,
+		"updated_at": now,
+	}).Error
+}
+
+func ListResellerProfiles() ([]ResellerProfile, error) {
+	profiles := make([]ResellerProfile, 0)
+	err := DB.Order("id asc").Find(&profiles).Error
+	return profiles, err
+}
+
+// SetResellerGroupCost is the platform wholesale price. It never touches a
+// customer price; it only defines what the reseller pays.
+func SetResellerGroupCost(resellerId int, group, ratio string, enabled bool, actorId int) error {
+	if resellerId <= 0 || strings.TrimSpace(group) == "" {
+		return errors.New("invalid reseller cost")
+	}
+	normalized, err := normalizeRatio(ratio)
+	if err != nil {
+		return err
+	}
+	now := common.GetTimestamp()
+	return DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "reseller_id"}, {Name: "group_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"cost_ratio", "enabled", "updated_by", "updated_at"}),
+	}).Create(&ResellerGroupCost{
+		ResellerId: resellerId, GroupName: group, CostRatio: normalized, Enabled: enabled, UpdatedBy: actorId, UpdatedAt: now,
+	}).Error
+}
+
+// SetResellerDefaultPrice is the reseller's standing retail price, applied to
+// every owned customer without a customer-specific price.
+func SetResellerDefaultPrice(resellerId int, group, ratio string, actorId int) error {
+	if resellerId <= 0 || strings.TrimSpace(group) == "" {
+		return errors.New("invalid reseller price")
+	}
+	normalized, err := normalizeRatio(ratio)
+	if err != nil {
+		return err
+	}
+	now := common.GetTimestamp()
+	if normalized == "" {
+		return DB.Where("reseller_id = ? AND group_name = ?", resellerId, group).Delete(&ResellerDefaultPrice{}).Error
+	}
+	return DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "reseller_id"}, {Name: "group_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"ratio", "updated_by", "updated_at"}),
+	}).Create(&ResellerDefaultPrice{
+		ResellerId: resellerId, GroupName: group, Ratio: normalized, UpdatedBy: actorId, UpdatedAt: now,
+	}).Error
+}
+
+// SetCustomerGroupPrice sets one customer's price for one group. An empty ratio
+// clears the override so the reseller default (or group ratio) applies again.
+func SetCustomerGroupPrice(userId int, group, ratio, source string, actorId int) error {
+	if userId <= 0 || strings.TrimSpace(group) == "" {
+		return errors.New("invalid customer price")
+	}
+	normalized, err := normalizeRatio(ratio)
+	if err != nil {
+		return err
+	}
+	if normalized == "" {
+		return DB.Where("user_id = ? AND group_name = ?", userId, group).Delete(&CustomerGroupPrice{}).Error
+	}
+	now := common.GetTimestamp()
+	return DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "group_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"ratio", "source", "updated_by", "updated_at"}),
+	}).Create(&CustomerGroupPrice{
+		UserId: userId, GroupName: group, Ratio: normalized, Source: source, UpdatedBy: actorId, UpdatedAt: now,
+	}).Error
+}
+
+// ListCustomerGroupPrices returns every per-group price override for one user.
+func ListCustomerGroupPrices(userId int) ([]CustomerGroupPrice, error) {
+	prices := make([]CustomerGroupPrice, 0)
+	if userId <= 0 {
+		return prices, errors.New("invalid user id")
+	}
+	err := DB.Where("user_id = ?", userId).Order("group_name asc").Find(&prices).Error
+	return prices, err
+}
+
+// ListResellerPricingBook returns the reseller's cost ratios and standing prices
+// for the console.
+func ListResellerPricingBook(resellerId int) ([]ResellerGroupCost, []ResellerDefaultPrice, error) {
+	costs := make([]ResellerGroupCost, 0)
+	if err := DB.Where("reseller_id = ?", resellerId).Order("group_name asc").Find(&costs).Error; err != nil {
+		return nil, nil, err
+	}
+	defaults := make([]ResellerDefaultPrice, 0)
+	if err := DB.Where("reseller_id = ?", resellerId).Order("group_name asc").Find(&defaults).Error; err != nil {
+		return nil, nil, err
+	}
+	return costs, defaults, nil
+}
+
+// normalizeRatio validates an operator-supplied ratio. An empty value is a valid
+// "clear" signal and is returned as an empty string.
+func normalizeRatio(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	ratio, ok := parsePositiveRatio(raw)
+	if !ok {
+		return "", errors.New("ratio must be a positive decimal")
+	}
+	return strconv.FormatFloat(ratio, 'f', -1, 64), nil
+}

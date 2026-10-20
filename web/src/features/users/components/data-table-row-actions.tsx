@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  BadgeDollarSign,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -66,6 +67,7 @@ import {
 import { getUserActionMessage } from '../lib'
 import type { User, ManageUserAction } from '../types'
 import { UserBindingDialog } from './dialogs/user-binding-dialog'
+import { UserPricingDialog } from './user-pricing-dialog'
 import { useUsers } from './users-provider'
 
 interface DataTableRowActionsProps {
@@ -80,6 +82,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [billingOpen, setBillingOpen] = useState(false)
+  const [pricingOpen, setPricingOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
 
   const handleEdit = () => {
@@ -166,12 +169,36 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         <TooltipContent>{t('Edit')}</TooltipContent>
       </Tooltip>
 
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              onClick={() => setPricingOpen(true)}
+              aria-label={t('Per-user pricing')}
+            />
+          }
+        >
+          <BadgeDollarSign />
+        </TooltipTrigger>
+        <TooltipContent>{t('Per-user pricing')}</TooltipContent>
+      </Tooltip>
+
       <DataTableRowActionMenu
         ariaLabel={t('Open menu')}
         contentClassName='w-48'
       >
         <DropdownMenuItem onClick={() => setBillingOpen(true)}>
           {t('Billing identity')}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={(event) => {
+            event.preventDefault()
+            setPricingOpen(true)
+          }}
+        >
+          {t('Per-user pricing')}
         </DropdownMenuItem>
         {isDisabled ? (
           <DropdownMenuItem onClick={() => handleManage('enable')}>
@@ -285,6 +312,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           {billingOpen && <BillingProfileCard userId={user.id} admin />}
         </DialogContent>
       </Dialog>
+
+      <UserPricingDialog
+        open={pricingOpen}
+        onOpenChange={setPricingOpen}
+        userId={user.id}
+        username={user.username}
+      />
 
       <ConfirmDialog
         open={resetPasskeyOpen}

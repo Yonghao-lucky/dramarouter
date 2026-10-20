@@ -30,27 +30,32 @@ var costDiscountPattern = regexp.MustCompile(`^(?:0(?:\.\d{1,6})?|1(?:\.0{1,6})?
 // positive and refunds are negative. Later corrections are append-only
 // adjustments.
 type CostAccountingSnapshot struct {
-	ID                int64  `json:"id" gorm:"primaryKey"`
-	EventKey          string `json:"event_key" gorm:"type:varchar(191);uniqueIndex"`
-	SourceLogID       int64  `json:"source_log_id" gorm:"index"`
-	RequestID         string `json:"request_id" gorm:"type:varchar(128);index"`
-	UpstreamRequestID string `json:"upstream_request_id" gorm:"type:varchar(128);index"`
-	UserID            int    `json:"user_id" gorm:"index:idx_cost_snapshot_user_time,priority:1"`
-	Username          string `json:"username" gorm:"type:varchar(191);index"`
-	TokenName         string `json:"token_name" gorm:"type:varchar(191);index"`
-	ModelName         string `json:"model_name" gorm:"type:varchar(255);index"`
-	ChannelID         int    `json:"channel_id" gorm:"index"`
-	GroupName         string `json:"group" gorm:"column:group_name;type:varchar(64);index"`
-	LogType           int    `json:"log_type" gorm:"index"`
-	OccurredAt        int64  `json:"occurred_at" gorm:"bigint;index:idx_cost_snapshot_user_time,priority:2;index"`
-	RevenueQuota      int64  `json:"revenue_quota" gorm:"bigint"`
-	CostBasisQuota    string `json:"cost_basis_quota" gorm:"type:varchar(64)"`
-	CostDiscount      string `json:"cost_discount" gorm:"type:varchar(16)"`
-	CostQuota         int64  `json:"cost_quota" gorm:"bigint"`
-	SnapshotVersion   int    `json:"snapshot_version"`
-	Source            string `json:"source" gorm:"type:varchar(16);index"`
-	BatchID           string `json:"batch_id,omitempty" gorm:"type:varchar(64);index"`
-	CreatedAt         int64  `json:"created_at" gorm:"bigint"`
+	ID                  int64  `json:"id" gorm:"primaryKey"`
+	EventKey            string `json:"event_key" gorm:"type:varchar(191);uniqueIndex"`
+	SourceLogID         int64  `json:"source_log_id" gorm:"index"`
+	RequestID           string `json:"request_id" gorm:"type:varchar(128);index"`
+	UpstreamRequestID   string `json:"upstream_request_id" gorm:"type:varchar(128);index"`
+	UserID              int    `json:"user_id" gorm:"index:idx_cost_snapshot_user_time,priority:1"`
+	OwnerID             int    `json:"owner_id" gorm:"index:idx_cost_snapshot_owner_time,priority:1"`
+	Username            string `json:"username" gorm:"type:varchar(191);index"`
+	TokenName           string `json:"token_name" gorm:"type:varchar(191);index"`
+	ModelName           string `json:"model_name" gorm:"type:varchar(255);index"`
+	ChannelID           int    `json:"channel_id" gorm:"index"`
+	GroupName           string `json:"group" gorm:"column:group_name;type:varchar(64);index"`
+	LogType             int    `json:"log_type" gorm:"index"`
+	OccurredAt          int64  `json:"occurred_at" gorm:"bigint;index:idx_cost_snapshot_user_time,priority:2;index:idx_cost_snapshot_owner_time,priority:2"`
+	RevenueQuota        int64  `json:"revenue_quota" gorm:"bigint"`
+	ResellerMarginQuota int64  `json:"reseller_margin_quota" gorm:"bigint"`
+	RetailRatio         string `json:"retail_ratio" gorm:"type:varchar(64)"`
+	ResellerCostRatio   string `json:"reseller_cost_ratio" gorm:"type:varchar(64)"`
+	ResellerSettlement  string `json:"reseller_settlement,omitempty" gorm:"type:varchar(16);index:idx_cost_snapshot_settlement,priority:1"`
+	CostBasisQuota      string `json:"cost_basis_quota" gorm:"type:varchar(64)"`
+	CostDiscount        string `json:"cost_discount" gorm:"type:varchar(16)"`
+	CostQuota           int64  `json:"cost_quota" gorm:"bigint"`
+	SnapshotVersion     int    `json:"snapshot_version"`
+	Source              string `json:"source" gorm:"type:varchar(16);index"`
+	BatchID             string `json:"batch_id,omitempty" gorm:"type:varchar(64);index"`
+	CreatedAt           int64  `json:"created_at" gorm:"bigint"`
 }
 
 // CostAccountingAdjustment never overwrites a snapshot. NewCostQuota is
@@ -93,6 +98,15 @@ type CostAccountingInput struct {
 	CostQuota      int64
 	Source         string
 	BatchID        string
+	// Reseller settlement evidence, frozen at write time. OwnerID 0 means the
+	// charge was platform-direct. Settlement is "pool" (the reseller wallet was
+	// charged wholesale at request time) or "self" (the customer paid retail from
+	// their own wallet; the margin is credited later by the rollup task).
+	OwnerID             int
+	RetailRatio         string
+	ResellerCostRatio   string
+	ResellerMarginQuota int64
+	ResellerSettlement  string
 }
 
 type CostAccountingFilter struct {
@@ -101,6 +115,7 @@ type CostAccountingFilter struct {
 	EndTimestamp              int64
 	UserID                    int
 	userIDs                   []int // Internal page scope; never accepted from a request.
+	OwnerID                   int   // Reseller ownership scope; 0 means unfiltered.
 	Username                  string
 	TokenName                 string
 	ModelName                 string
@@ -224,26 +239,31 @@ func BuildCostAccountingSnapshot(log *Log, input *CostAccountingInput) (*CostAcc
 		return nil, errors.New("cost accounting event key is too long")
 	}
 	snapshot := &CostAccountingSnapshot{
-		EventKey:          eventKey,
-		SourceLogID:       int64(log.Id),
-		RequestID:         log.RequestId,
-		UpstreamRequestID: log.UpstreamRequestId,
-		UserID:            log.UserId,
-		Username:          log.Username,
-		TokenName:         log.TokenName,
-		ModelName:         log.ModelName,
-		ChannelID:         log.ChannelId,
-		GroupName:         log.Group,
-		LogType:           log.Type,
-		OccurredAt:        log.CreatedAt,
-		RevenueQuota:      revenue,
-		CostBasisQuota:    costBasis.StringFixed(6),
-		CostDiscount:      discount,
-		CostQuota:         input.CostQuota,
-		SnapshotVersion:   CostAccountingSnapshotVersion,
-		Source:            source,
-		BatchID:           input.BatchID,
-		CreatedAt:         common.GetTimestamp(),
+		EventKey:            eventKey,
+		SourceLogID:         int64(log.Id),
+		RequestID:           log.RequestId,
+		UpstreamRequestID:   log.UpstreamRequestId,
+		UserID:              log.UserId,
+		Username:            log.Username,
+		TokenName:           log.TokenName,
+		ModelName:           log.ModelName,
+		ChannelID:           log.ChannelId,
+		GroupName:           log.Group,
+		LogType:             log.Type,
+		OccurredAt:          log.CreatedAt,
+		RevenueQuota:        revenue,
+		OwnerID:             input.OwnerID,
+		RetailRatio:         input.RetailRatio,
+		ResellerCostRatio:   input.ResellerCostRatio,
+		ResellerMarginQuota: input.ResellerMarginQuota,
+		ResellerSettlement:  input.ResellerSettlement,
+		CostBasisQuota:      costBasis.StringFixed(6),
+		CostDiscount:        discount,
+		CostQuota:           input.CostQuota,
+		SnapshotVersion:     CostAccountingSnapshotVersion,
+		Source:              source,
+		BatchID:             input.BatchID,
+		CreatedAt:           common.GetTimestamp(),
 	}
 	return snapshot, nil
 }
@@ -407,6 +427,9 @@ func applyCostAccountingFilter(tx *gorm.DB, filter CostAccountingFilter) (*gorm.
 	}
 	if filter.UserID != 0 {
 		tx = tx.Where("snapshots.user_id = ?", filter.UserID)
+	}
+	if filter.OwnerID != 0 {
+		tx = tx.Where("snapshots.owner_id = ?", filter.OwnerID)
 	}
 	var err error
 	if tx, err = applyCostAccountingTextFilter(tx, "snapshots.username", filter.Username); err != nil {

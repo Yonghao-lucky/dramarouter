@@ -179,6 +179,15 @@ func ApplyBillingCorrection(id, digest, rate, userGroup string, actorID int, rev
 			cost := CostAccountingSnapshot{EventKey: entry.EventKey, RequestID: entry.RequestID, UserID: user.Id, Username: user.Username,
 				TokenName: sourceToken.Name, ModelName: row.ModelName, ChannelID: row.ChannelID, GroupName: group, LogType: LogTypeBillingCorrection, OccurredAt: entry.PostedAt,
 				RevenueQuota: delta, CostBasisQuota: "0", CostDiscount: "0", SnapshotVersion: 4, Source: "correction", BatchID: batch.ID, CreatedAt: entry.PostedAt}
+			// A rate correction on a reseller-priced charge moves the reseller
+			// margin too, so the same ownership evidence is frozen here.
+			if owner, costRatio, ok := resellerCostForCorrection(tx, user.Id, group, rowRate); ok {
+				cost.OwnerID = owner
+				cost.RetailRatio = rowRate
+				cost.ResellerCostRatio = costRatio
+				cost.ResellerMarginQuota = resellerMarginFromRatios(delta, rowRate, costRatio)
+				cost.ResellerSettlement = "correction"
+			}
 			if err := tx.Create(&cost).Error; err != nil {
 				return err
 			}
@@ -252,4 +261,39 @@ func ApplyBillingCorrection(id, digest, rate, userGroup string, actorID int, rev
 		_ = InvalidateUserTokensCache(batch.UserID)
 	}
 	return batch, err
+}
+
+// resellerCostForCorrection resolves the reseller ownership and wholesale cost
+// for a corrected charge. Corrections never move reseller money directly; they
+// only keep the frozen margin evidence consistent with the corrected revenue.
+func resellerCostForCorrection(tx *gorm.DB, customerUserId int, group, rate string) (int, string, bool) {
+	if customerUserId <= 0 || group == "" || rate == "" {
+		return 0, "", false
+	}
+	var binding ResellerCustomerBinding
+	err := tx.Where("customer_user_id = ?", customerUserId).First(&binding).Error
+	if err != nil || binding.ResellerId <= 0 {
+		return 0, "", false
+	}
+	var cost ResellerGroupCost
+	err = tx.Where("reseller_id = ? AND group_name = ? AND enabled = ?", binding.ResellerId, group, true).First(&cost).Error
+	if err != nil {
+		return 0, "", false
+	}
+	if _, ok := parsePositiveRatio(cost.CostRatio); !ok {
+		return 0, "", false
+	}
+	return binding.ResellerId, cost.CostRatio, true
+}
+
+func resellerMarginFromRatios(signedRetailQuota int64, retailRatioRaw, costRatioRaw string) int64 {
+	retailRatio, ok := parsePositiveRatio(retailRatioRaw)
+	if !ok {
+		return 0
+	}
+	costRatio, ok := parsePositiveRatio(costRatioRaw)
+	if !ok {
+		return 0
+	}
+	return ResellerMarginQuota(signedRetailQuota, retailRatio, costRatio)
 }

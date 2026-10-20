@@ -151,6 +151,14 @@ type RelayInfo struct {
 	ParamOverrideAudit                    []string
 
 	PriceData hosttypes.PriceData
+	// Reseller pricing frozen at price time. OwnerID 0 means the customer is
+	// platform-direct or has no reseller price, so no reseller path applies.
+	// Path is "pool" when the reseller pool funds this request, and "self" when
+	// the customer pays retail from their own wallet (margin credited later).
+	ResellerOwnerID     int
+	ResellerRetailRatio float64
+	ResellerCostRatio   float64
+	ResellerPath        string
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// supported single-request bound (or NaN fallback) while computing this request's charge.

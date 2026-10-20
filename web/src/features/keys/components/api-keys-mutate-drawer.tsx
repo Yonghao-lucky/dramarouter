@@ -63,7 +63,11 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useStatus } from '@/hooks/use-status'
-import { getUserModels, getUserGroups } from '@/lib/api'
+import {
+  getUserModels,
+  getUserGroups,
+  getUserVendorGroups,
+} from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { cn } from '@/lib/utils'
 
@@ -88,6 +92,7 @@ import {
 } from './api-key-group-combobox'
 import { useApiKeys } from './api-keys-provider'
 import { AutoGroupOrderEditor } from './auto-group-order-editor'
+import { VendorRoutePicker } from './vendor-route-picker'
 
 type ApiKeyMutateDrawerProps = {
   open: boolean
@@ -153,6 +158,17 @@ export function ApiKeysMutateDrawer({
     enabled: open,
     staleTime: 0,
   })
+
+  const { data: vendorGroupsData } = useQuery({
+    queryKey: ['user-vendor-groups'],
+    queryFn: getUserVendorGroups,
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  })
+  const vendorCatalogs = useMemo(
+    () => vendorGroupsData?.data ?? [],
+    [vendorGroupsData]
+  )
 
   const models = modelsData?.data || []
   const groups = useMemo<ApiKeyGroupOption[]>(
@@ -417,30 +433,98 @@ export function ApiKeysMutateDrawer({
                 name='group'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Group')}</FormLabel>
+                    <FormLabel>{t('Group configuration')}</FormLabel>
                     <FormControl>
-                      <ApiKeyGroupCombobox
-                        options={groups}
-                        value={field.value}
-                        onValueChange={(group) => {
-                          field.onChange(group)
-                          if (group === 'auto') {
-                            form.setValue('cross_group_retry', true, {
-                              shouldDirty: true,
-                            })
-                            return
-                          }
-                          form.setValue('cross_group_retry', false, {
-                            shouldDirty: true,
-                          })
-                        }}
-                        placeholder={t('Select a group')}
-                      />
+                      <div className='flex flex-col gap-3'>
+                        <div className='bg-muted/40 flex gap-1 rounded-lg p-1'>
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant={field.value !== 'auto' ? 'default' : 'ghost'}
+                            className='flex-1'
+                            onClick={() => {
+                              const fallback =
+                                groups.find((g) => g.value === 'default')
+                                  ?.value ??
+                                groups.find((g) => g.value !== 'auto')?.value ??
+                                ''
+                              field.onChange(fallback)
+                              form.setValue('cross_group_retry', false, {
+                                shouldDirty: true,
+                              })
+                              form.setValue('vendor_auto_groups', [], {
+                                shouldDirty: true,
+                              })
+                            }}
+                          >
+                            {t('Single group')}
+                          </Button>
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant={field.value === 'auto' ? 'default' : 'ghost'}
+                            className='flex-1'
+                            disabled={!backendHasAuto}
+                            onClick={() => {
+                              field.onChange('auto')
+                              form.setValue('cross_group_retry', true, {
+                                shouldDirty: true,
+                              })
+                            }}
+                          >
+                            {t('Aggregate key')}
+                          </Button>
+                        </div>
+
+                        {field.value !== 'auto' && (
+                          <ApiKeyGroupCombobox
+                            options={groups.filter((g) => g.value !== 'auto')}
+                            value={field.value}
+                            onValueChange={(group) => field.onChange(group)}
+                            placeholder={t('Select a group')}
+                          />
+                        )}
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+
+              {selectedGroup === 'auto' && vendorCatalogs.length > 0 && (
+                <FormField
+                  control={form.control}
+                  name='vendor_auto_groups'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Model vendor order')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'One group can serve models from several vendors. Set the retry order per vendor.'
+                        )}
+                      </FormDescription>
+                      <FormControl>
+                        <VendorRoutePicker
+                          catalogs={vendorCatalogs}
+                          value={field.value}
+                          maxCount={maxAutoGroups}
+                          onChange={(orders) => {
+                            field.onChange(orders)
+                            // 厂商顺序是显式配置，必须切换到自定义模式才会随请求提交。
+                            if (orders.length > 0) {
+                              form.setValue('auto_groups_mode', 'custom', {
+                                shouldDirty: true,
+                                shouldValidate: false,
+                              })
+                            }
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               {selectedGroup === 'auto' && (
                 <FormField
@@ -448,10 +532,10 @@ export function ApiKeysMutateDrawer({
                   name='auto_groups'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Auto group order')}</FormLabel>
+                      <FormLabel>{t('Default Auto order')}</FormLabel>
                       <FormDescription>
                         {t(
-                          'Choose and order the groups this API key will try.'
+                          'Used by vendors without their own order, and by models whose vendor is unknown.'
                         )}
                       </FormDescription>
                       <FormControl>

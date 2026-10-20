@@ -150,7 +150,9 @@ func SetApiRouter(router *gin.Engine) {
 			//userRoute.POST("/tokenlog", middleware.CriticalRateLimit(), controller.TokenLog)
 			userRoute.POST("/epay/notify", anonymousRequestBodyLimit, controller.EpayNotify)
 			userRoute.GET("/epay/notify", controller.EpayNotify)
-			userRoute.GET("/groups", controller.GetUserGroups)
+			// TryUserAuth keeps the endpoint usable before login while letting a
+			// signed-in customer see their own (reseller) ratio.
+			userRoute.GET("/groups", middleware.TryUserAuth(), controller.GetUserGroups)
 
 			selfRoute := userRoute.Group("/")
 			selfRoute.Use(middleware.UserAuth())
@@ -172,6 +174,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/self/phone/code", middleware.CriticalRateLimit(), controller.SendPhoneBindingCode)
 				selfRoute.POST("/self/phone/bind", middleware.CriticalRateLimit(), controller.ConfirmPhoneBinding)
 				selfRoute.GET("/models", controller.GetUserModels)
+				selfRoute.GET("/self/vendor-groups", controller.GetUserVendorGroups)
 				selfRoute.GET("/playground/media", controller.GetPlaygroundMedia)
 				selfRoute.PUT("/self", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UpdateSelf)
 				selfRoute.DELETE("/self", controller.DeleteSelf)
@@ -238,10 +241,37 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.DELETE("/:id", controller.DeleteUser)
 				adminRoute.DELETE("/:id/reset_passkey", controller.AdminResetPasskey)
 
+				// Reseller administration and the per-user, per-group price override.
+				adminRoute.GET("/reseller/profiles", controller.AdminListResellers)
+				adminRoute.GET("/reseller/book", controller.AdminResellerPriceBook)
+				adminRoute.GET("/reseller/customers", controller.AdminResellerCustomers)
+				adminRoute.PUT("/reseller/profile", controller.AdminUpsertReseller)
+				adminRoute.PUT("/reseller/cost", controller.AdminSetResellerCost)
+				adminRoute.PUT("/reseller/price", controller.AdminSetResellerDefaultPrice)
+				adminRoute.PUT("/reseller/allocation", controller.AdminSetResellerAllocation)
+				adminRoute.GET("/:id/group-pricing", controller.AdminGetCustomerGroupPricing)
+				adminRoute.PUT("/:id/group-pricing", controller.AdminSetCustomerGroupPrice)
+				adminRoute.PUT("/:id/owner", controller.AdminSetCustomerOwner)
+
 				// Admin 2FA routes
 				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)
 				adminRoute.DELETE("/:id/2fa", controller.AdminDisable2FA)
 			}
+		}
+
+		// Reseller console: read-only views plus customer creation and allocation.
+		// Ownership changes stay administrator-only.
+		resellerRoute := apiRouter.Group("/reseller")
+		resellerRoute.Use(middleware.UserAuth())
+		{
+			resellerRoute.GET("/summary", controller.ResellerSummary)
+			resellerRoute.GET("/customers", controller.ResellerCustomers)
+			resellerRoute.POST("/customers", controller.ResellerCreateCustomer)
+			resellerRoute.PUT("/customers/:id/allocation", controller.ResellerSetCustomerAllocation)
+			resellerRoute.PUT("/customers/:id/price", controller.ResellerSetCustomerPrice)
+			resellerRoute.GET("/usage", controller.ResellerUsage)
+			resellerRoute.GET("/margins", controller.ResellerMargins)
+			resellerRoute.GET("/price-book", controller.ResellerPriceBook)
 		}
 
 		// Subscription billing (plans, purchase, admin management)

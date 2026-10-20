@@ -79,6 +79,7 @@ import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
+import { ModelPeakPricingSection } from './model-peak-pricing'
 
 // ----------------------------------------------------------------------------
 // Local UI helpers
@@ -1191,6 +1192,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               tokenUnit={props.tokenUnit}
               showRechargePrice={showRechargePrice}
             />
+            <ModelPeakPricingSection view={props.model.peak_pricing} />
           </section>
 
           <ModelBackendDetailsSection model={props.model} />

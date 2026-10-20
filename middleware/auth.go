@@ -513,6 +513,14 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 			common.SetContextKey(c, constant.ContextKeyTokenAutoGroups, autoGroups)
 		}
 	}
+	if token.VendorAutoGroups != "" {
+		vendorOrders, err := token.GetVendorAutoGroups()
+		if err != nil {
+			common.SysError(fmt.Sprintf("failed to parse vendor auto groups for token %d: %v", token.Id, err))
+		} else if len(vendorOrders) > 0 {
+			common.SetContextKey(c, constant.ContextKeyTokenVendorAutoGroups, vendorOrders)
+		}
+	}
 	if len(parts) > 1 {
 		if model.IsAdmin(token.UserId) {
 			c.Set("specific_channel_id", parts[1])

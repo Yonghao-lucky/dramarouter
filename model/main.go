@@ -324,6 +324,9 @@ func migrateDB() error {
 		&BillingAccount{}, &BillingAccountEvent{}, &BillingOperation{}, &BillingEntry{}, &BillingHour{},
 		&BillingCorrection{}, &BillingCorrectionRow{}, &BillingCorrectionClaim{},
 		&CostAccountingSnapshot{}, &CostAccountingAdjustment{},
+		&ResellerProfile{}, &ResellerGroupCost{}, &ResellerDefaultPrice{},
+		&CustomerGroupPrice{}, &ResellerCustomerBinding{}, &ResellerCustomerEvent{},
+		&ResellerCustomerAllocation{}, &ResellerMarginsDaily{}, &ResellerAllocationReservation{}, &ResellerMarginCreditCursor{},
 		&BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{},
 		&Channel{},
 		&Token{},
@@ -410,7 +413,7 @@ func migrateDBFast() error {
 	if err := ensureStorageObjectUploadMetadataColumns(DB); err != nil {
 		return err
 	}
-	if err := DB.AutoMigrate(&BillingAccount{}, &BillingAccountEvent{}, &BillingOperation{}, &BillingEntry{}, &BillingHour{}, &BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{}, &CostAccountingSnapshot{}, &CostAccountingAdjustment{}, &BillingCorrection{}, &BillingCorrectionRow{}, &BillingCorrectionClaim{}); err != nil {
+	if err := DB.AutoMigrate(&BillingAccount{}, &BillingAccountEvent{}, &BillingOperation{}, &BillingEntry{}, &BillingHour{}, &BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{}, &CostAccountingSnapshot{}, &CostAccountingAdjustment{}, &BillingCorrection{}, &BillingCorrectionRow{}, &BillingCorrectionClaim{}, &ResellerProfile{}, &ResellerGroupCost{}, &ResellerDefaultPrice{}, &CustomerGroupPrice{}, &ResellerCustomerBinding{}, &ResellerCustomerEvent{}, &ResellerCustomerAllocation{}, &ResellerMarginsDaily{}, &ResellerAllocationReservation{}, &ResellerMarginCreditCursor{}); err != nil {
 		return err
 	}
 	if err := ensureChannelCostDiscountColumn(DB); err != nil {
