@@ -6454,6 +6454,7 @@
     "Selected {{count}}": "已选 {{count}} 个",
     "Selected {{selected}} / {{total}}": "已选 {{selected}} / {{total}}",
     "Selecting a plugin fills its declared models and default base URL.": "选择插件后将自动填入其声明的模型和默认 Base URL。",
+    "Selecting a plugin fills its declared models.": "选择插件后将自动填入其声明的模型。",
     "Selection changed. Preview again.": "筛选条件已变化，请重新预览。",
     "Self-Use Mode": "自用模式",
     "Self-pay": "自付",

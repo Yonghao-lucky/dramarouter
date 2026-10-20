@@ -6372,6 +6372,7 @@
     "Selected {{count}}": "已選 {{count}} 個",
     "Selected {{selected}} / {{total}}": "已選 {{selected}} / {{total}}",
     "Selecting a plugin fills its declared models and default base URL.": "選擇外掛後將自動填入其宣告的模型和預設 Base URL。",
+    "Selecting a plugin fills its declared models.": "選擇外掛後將自動填入其宣告的模型。",
     "Selection changed. Preview again.": "篩選條件已變更，請重新預覽。",
     "Self-Use Mode": "自用模式",
     "Send": "發送",

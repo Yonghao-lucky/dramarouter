@@ -6372,6 +6372,7 @@
     "Selected {{count}}": "Выбрано: {{count}}",
     "Selected {{selected}} / {{total}}": "Выбрано {{selected}} / {{total}}",
     "Selecting a plugin fills its declared models and default base URL.": "Выбор плагина заполняет заявленные модели и базовый URL по умолчанию.",
+    "Selecting a plugin fills its declared models.": "Выбор плагина заполняет заявленные модели.",
     "Selection changed. Preview again.": "Выбор изменился. Создайте новый предпросмотр.",
     "Self-Use Mode": "Режим самоиспользования",
     "Send": "Отправить",

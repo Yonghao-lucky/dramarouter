@@ -6372,6 +6372,7 @@
     "Selected {{count}}": "{{count}} sélectionné(s)",
     "Selected {{selected}} / {{total}}": "Sélection : {{selected}} / {{total}}",
     "Selecting a plugin fills its declared models and default base URL.": "La sélection remplit les modèles déclarés et l'URL de base par défaut.",
+    "Selecting a plugin fills its declared models.": "La sélection remplit les modèles déclarés.",
     "Selection changed. Preview again.": "La sélection a changé. Relancez l’aperçu.",
     "Self-Use Mode": "Mode d'utilisation personnelle",
     "Send": "Envoyer",

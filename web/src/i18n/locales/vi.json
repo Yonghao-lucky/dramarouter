@@ -6372,6 +6372,7 @@
     "Selected {{count}}": "Đã chọn {{count}}",
     "Selected {{selected}} / {{total}}": "Đã chọn {{selected}} / {{total}}",
     "Selecting a plugin fills its declared models and default base URL.": "Chọn plugin sẽ điền các model đã khai báo và Base URL mặc định.",
+    "Selecting a plugin fills its declared models.": "Chọn plugin sẽ điền các model đã khai báo.",
     "Selection changed. Preview again.": "Lựa chọn đã thay đổi. Hãy xem trước lại.",
     "Self-Use Mode": "Chế độ tự sử dụng",
     "Send": "Gửi",

@@ -6372,6 +6372,7 @@
     "Selected {{count}}": "{{count}} 件選択済み",
     "Selected {{selected}} / {{total}}": "選択済み {{selected}} / {{total}}",
     "Selecting a plugin fills its declared models and default base URL.": "プラグインを選択すると宣言済みモデルと既定の Base URL が入力されます。",
+    "Selecting a plugin fills its declared models.": "プラグインを選択すると宣言済みモデルが入力されます。",
     "Selection changed. Preview again.": "選択が変更されました。再プレビューしてください。",
     "Self-Use Mode": "セルフユースモード",
     "Send": "送信",
