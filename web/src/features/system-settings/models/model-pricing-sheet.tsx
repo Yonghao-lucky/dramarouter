@@ -95,6 +95,8 @@ type ModelPricingSheetProps = {
   isSaving?: boolean
   // 任务插件声明的计费用量字段；存在时按用量填写价格。
   usageSchema?: BillingUsageSchema
+  // 用量字段仍在加载时不要渲染 token 表达式编辑器，否则它会改写已保存的任务表达式。
+  usageSchemaLoading?: boolean
   onDirtyChange?: (dirty: boolean) => void
 }
 
@@ -113,7 +115,15 @@ export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingSheetProps
 >(function ModelPricingSheet(
-  { open, onOpenChange, editData, onSave, isSaving, usageSchema },
+  {
+    open,
+    onOpenChange,
+    editData,
+    onSave,
+    isSaving,
+    usageSchema,
+    usageSchemaLoading,
+  },
   ref
 ) {
   const { t } = useTranslation()
@@ -134,6 +144,7 @@ export const ModelPricingSheet = forwardRef<
           ref={ref}
           editData={editData}
           usageSchema={usageSchema}
+          usageSchemaLoading={usageSchemaLoading}
           onSave={onSave}
           isSaving={isSaving}
           className='h-full rounded-none border-0'
@@ -147,7 +158,7 @@ export const ModelPricingEditorPanel = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingEditorPanelProps
 >(function ModelPricingEditorPanel(
-  { editData, className, onSave, isSaving, usageSchema },
+  { editData, className, onSave, isSaving, usageSchema, usageSchemaLoading },
   ref
 ) {
   const { t } = useTranslation()
@@ -659,6 +670,10 @@ export const ModelPricingEditorPanel = forwardRef<
                           billingExpr={billingExpr}
                           onBillingExprChange={setBillingExpr}
                         />
+                      ) : usageSchemaLoading ? (
+                        <p className='text-muted-foreground text-sm'>
+                          {t('Loading...')}
+                        </p>
                       ) : (
                         <TieredPricingEditor
                           key={editorReloadToken}

@@ -152,6 +152,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     editingModelName ? [editingModelName] : [],
     Boolean(editingModelName)
   )
+  const usageSchemaLoading = Boolean(editingModelName) && usageQuery.isPending
   const usageSchema = usageQuery.data?.entries.find(
     (entry) => entry.model_name === editingModelName
   )?.usage_schema
@@ -789,6 +790,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
               ref={editorPanelRef}
               editData={editData}
               usageSchema={usageSchema}
+              usageSchemaLoading={usageSchemaLoading}
               onSave={onSave}
               isSaving={isSaving}
               className='h-full min-h-0'
@@ -830,6 +832,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
           onOpenChange={setSheetOpen}
           editData={editData}
           usageSchema={usageSchema}
+          usageSchemaLoading={usageSchemaLoading}
           onSave={onSave}
           isSaving={isSaving}
         />
