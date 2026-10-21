@@ -426,14 +426,27 @@ func updatePricing() {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
 			}
+		} else if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved && target.Declared != "" {
+			if tailMode := billing_setting.GetBillingMode(target.Declared); tailMode == "tiered_expr" {
+				if expr, ok := billing_setting.GetBillingExpr(target.Declared); ok && strings.TrimSpace(expr) != "" {
+					pricing.BillingMode = tailMode
+					pricing.BillingExpr = expr
+				}
+			}
 		}
 		plugin, hasPlugin := pluginGeneration.GetByModel(model)
 		var usageSchema map[string]jsplugin.UsageFieldSchema
 		var usageExamples []jsplugin.UsageExample
 		if hasPlugin {
 			usageSchema, usageExamples = plugin.Meta.UsageForModels(model)
+		} else if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved {
+			// 渠道映射出来的别名（如 MiniMax-H3/xx）沿用映射目标模型的计费字段。
+			plugin, hasPlugin = pluginGeneration.Get(target.PluginKey)
+			if hasPlugin {
+				usageSchema, usageExamples = plugin.Meta.UsageForModels(target.Declared, model)
+			}
 		}
-		if hasPlugin && len(usageSchema) > 0 {
+		if hasPlugin && plugin != nil && len(usageSchema) > 0 {
 			pricing.BillingUsageSchema = make(map[string]jsplugin.UsageFieldSchema, len(usageSchema))
 			for key, field := range usageSchema {
 				field.Enum = append([]string(nil), field.Enum...)
