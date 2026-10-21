@@ -58,9 +58,10 @@ docker run -d --name novamaas --restart unless-stopped \
 
 | 领域 | 主要区别 |
 | --- | --- |
-| 模型与视频协议 | 火山原生渠道、视频任务审计与交付，以及 Moonshot/Kimi 兼容入口和用量结构。 |
+| 模型与视频协议 | 火山原生渠道、视频任务审计与交付，Moonshot/Kimi 兼容入口和用量结构，以及保留原生适配器的 JS 任务插件系统（渠道类型 62）。 |
+| 路由与 Key | 聚合 Key 按模型厂商分别排列分组重试顺序。 |
 | 素材与存储 | 私有素材库、下游 Action API、渠道副本同步、Base64 媒体暂存和请求快照异步归档。 |
-| 计费与对账 | 渠道成本快照、利润视图、正式消费账本和月度凭证。 |
+| 计费与对账 | 渠道成本快照、利润视图、正式消费账本和月度凭证；分项峰谷定价、按用户与经销商定价，以及任务插件按用量计价（含免费额度）。 |
 | 用户与客户端 | 手机号身份、微信小程序登录、多媒体对话及受控模型能力。 |
 | 运行观测 | 当前节点资源、分类流量、活跃请求与连接数；有界纯内存历史及低开销采集。 |
 
@@ -78,6 +79,9 @@ CI/CD、镜像发布、构建环境、首页展示、文档整理、测试补充
 <!-- novamaas-pr-ledger:start -->
 | 关键差异 PR | 日期 | 类型 | 领域 | 关键变化 | 与上游关系 |
 | --- | --- | --- | --- | --- | --- |
+| [`043df00ff`](https://github.com/Yonghao-lucky/dramarouter/commit/043df00ff0ce10be1a912737d82150a81da04985) | 2026-10-20 | `feat` | 任务插件 / MiniMax-H3 / 用量计价 | 内置 Hailuo 插件升级为上游 v1.3.0，新增 MiniMax-H3（`/v2`）并上报输入图片张数和输入视频时长；引擎支持 `usageProfiles` 按模型族声明计费字段，定价快照、两处表达式校验、模型广场与运行时用量校验均按模型取字段；模型定价（模型抽屉与系统设置两处入口）提供任务用量表单，计数类用量可设「前 N 个免费」，生成 `max(0, u("字段") - N) * 单价`。因本引擎无 `utils.fetch`，v1 视频改用渠道 Key 直连 `/v1/files/download`，并去掉不识别的 `upstreams` 元字段。 | 插件内容与 `usageProfiles` 选择性同步上游 [`aece11d2f`](https://github.com/QuantumNous/new-api/commit/aece11d2f7f095a33052696c5d28d3656609a99e)、[`73afad588`](https://github.com/QuantumNous/new-api/commit/73afad588ca7af07134fa423e8a33fdea6c855b2)、[`a8ed7f7c5`](https://github.com/QuantumNous/new-api/commit/a8ed7f7c5f24e56c2f1612126d82e9fec625056c)、[`74629e29f`](https://github.com/QuantumNous/new-api/commit/74629e29f83f506bb523c5542aa851947bd423eb)；任务用量计价表单与「免费数量」为下游扩展。同步时须保留 v1 下载路径与按模型取字段的全部调用点。 |
+| [`62fa3b12b`](https://github.com/Yonghao-lucky/dramarouter/commit/62fa3b12b9c27dd10718a04167744c0d0e3b7992) | 2026-10-20 | `feat` | 任务插件 / 视频任务路由 / 渠道类型 | 引入沙箱化 JS 任务插件系统与 10 个内置插件、`/api/plugin/task` 管理、`/v1/tasks` 通用入口和产物代理；任务插件渠道类型为 **62**（61 保留给 Volc Native）；阿里百炼、豆包/火山与 Volc Native 继续走原生 Go 适配器以保留 Wan3、Seedance 2.5 分档、Base64 暂存、素材 ID 解析与请求快照，对应 `alibaba`、`doubao` 内置插件默认列入 `TaskPluginDisabledFactoryKeys`；旧任务动作写法与新规范名并存可查。 | 同步上游 [`eb48396d5`](https://github.com/QuantumNous/new-api/commit/eb48396d5fe97d27772d0cd5e3ca8aa5caa4f3e9)（#7076）；渠道类型编号、三类原生适配器保留与默认停用插件为下游差异，同步时须重新核对编号冲突与原生分发表。 |
+| [`4edc6f255`](https://github.com/Yonghao-lucky/dramarouter/commit/4edc6f255f1ddc6bd6cad0e79f6eb09c55ce76d2) | 2026-10-20 | `feat` | 聚合 Key / 模型路由 / 峰谷定价 / 经销商 | 聚合 Key（`auto` 分组）可按**模型厂商**分别排列分组重试顺序（`VendorAutoGroups`，按 `models.vendor_id` 解析厂商，未配置厂商回落默认顺序）；输入、输出、缓存读、5 分钟/1 小时缓存写分别设置峰谷系数，支持表达式、北京时间/UTC、星期与跨午夜时段及按模型覆盖，在请求开始时折入 PriceData 使预扣与结算一致，仅作用于按倍率计费的模型；新增按用户分组定价与经销商体系（批发价、默认零售价、客户级定价、额度池与逐笔利润快照）。 | NovaMaaS 下游专属；上游时间定价（`d52bdc0b4`）仅作用于 `tiered_expr` 表达式内部，与本峰谷系数层互斥共存。同步时须保留 `GetModelVendorID`、峰谷系数注入点及 `HandleGroupRatio` 中的用户级定价查找。 |
 | [#82](https://github.com/yeruyi1024/novamaas-workspace/pull/82) | 2026-10-17 | `fix` | OpenAI / Responses / 流式响应 | 协议终止事件优先于传输结束，读端完成后排空缓冲，已确认的上游读取错误不被稍后的客户端取消掩盖；普通 Chat 与 Responses 缺终止信号时明确报错，不伪造成功尾帧，已开始的 Chat 流先转发缓冲中的有效内容或工具参数再报错；已输出、取消或客户端写入失败后不再重试并保留有效用量；写失败前保留真实用量和缓存，转换流零占位不覆盖用量，重试不累积已丢弃尝试的工具费；心跳写失败关闭上游，保留工具结束帧，输出前 HTTP 错误恢复 JSON 响应头。 | 选择性同步官方 #6769 的 Chat 终止门控，针对 #6239、#7059、#6649、#7632 追加 NovaMaaS 下游加固；同步时须保留原生及转换流的终止、重试、有效用量与 Kimi 原始分片边界。 |
 | [#81](https://github.com/yeruyi1024/novamaas-workspace/pull/81) | 2026-10-17 | `fix` | 流式用量 / 缓存计费明细 | 持续保留最新有效用量及原始分片，后续空分片或零用量占位不再触发估算；Anthropic 转换前恢复渠道缓存明细，保留完整计费快照、真实缺失时的估算和 Kimi 原始流透传。 | 官方 `09109ec315` 倒数第二帧回退逻辑的 NovaMaaS 下游扩展；同步时须保留多尾帧恢复、渠道缓存归一化、最终协议用量及透传边界。 |
 | [#79](https://github.com/yeruyi1024/novamaas-workspace/pull/79) | 2026-10-17 | `fix/feat` | Anthropic 用量 / 历史 Token 核算 | OpenAI → Anthropic 输出普通输入与缓存读写分离，保留原始计费快照；管理员可按客户、Key、模型、协议及时间只读核算历史 Token 与两种历史价格，在明确的旧版原生缓存写入字段假设下，仅重算无写入请求的读取重叠，导出记录依据且不自动调整钱包。 | 协议规则选择性同步上游提交 `0ed497f066`；管理员历史核算为 NovaMaaS 下游专属，上游同步时须保留协议语义与内部计费分离、未知历史凭证不猜测及只读核算边界。 |
