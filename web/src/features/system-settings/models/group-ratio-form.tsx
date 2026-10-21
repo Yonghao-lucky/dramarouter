@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Code2, Eye, HelpCircle } from 'lucide-react'
-import { memo, useCallback, useState, type ReactNode } from 'react'
+import { memo, useCallback, useRef, useState, type ReactNode } from 'react'
 import { useWatch, type UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import {
   sideDrawerContentClassName,
@@ -62,6 +63,7 @@ import { SettingsPageActionsPortal } from '../components/settings-page-context'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import {
   GroupRatioVisualEditor,
+  type GroupPricingRowProblem,
   type GroupSettingsSection,
 } from './group-ratio-visual-editor'
 
@@ -92,6 +94,13 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [guideOpen, setGuideOpen] = useState(false)
   const [section, setSection] = useState<GroupSettingsSection>('pricing')
+  const pricingProblems = useRef<GroupPricingRowProblem[]>([])
+  const handlePricingProblemsChange = useCallback(
+    (problems: GroupPricingRowProblem[]) => {
+      pricingProblems.current = problems
+    },
+    []
+  )
 
   const handleFieldChange = useCallback(
     (field: keyof GroupFormValues, value: string) => {
@@ -151,13 +160,49 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <Button
             type='button'
             size='sm'
-            onClick={form.handleSubmit(onSave, (errors) => {
-              if (errors.MaxTokenAutoGroups) {
-                setEditMode('visual')
-                setSection('auto')
-                requestAnimationFrame(() => form.setFocus('MaxTokenAutoGroups'))
+            onClick={(event) => {
+              const problem =
+                editMode === 'visual' ? pricingProblems.current[0] : undefined
+              if (problem) {
+                setSection('pricing')
+                const messages: Record<GroupPricingRowProblem['kind'], string> =
+                  {
+                    'empty-name': t(
+                      'A group name is empty. Fill it in or remove the row.'
+                    ),
+                    'duplicate-name': t(
+                      'Group "{{name}}" appears more than once. Group names must be unique.',
+                      { name: problem.name }
+                    ),
+                    'invalid-ratio': t(
+                      'Group "{{name}}" needs a ratio of 0 or more.',
+                      { name: problem.name }
+                    ),
+                    'invalid-topup': t(
+                      'Group "{{name}}" has an invalid top-up ratio.',
+                      { name: problem.name }
+                    ),
+                  }
+                toast.error(messages[problem.kind])
+                return
               }
-            })}
+              void form.handleSubmit(onSave, (errors) => {
+                if (errors.MaxTokenAutoGroups) {
+                  setEditMode('visual')
+                  setSection('auto')
+                  requestAnimationFrame(() =>
+                    form.setFocus('MaxTokenAutoGroups')
+                  )
+                }
+                if (!errors.MaxTokenAutoGroups) {
+                  toast.error(
+                    t(
+                      'Some group settings are invalid. Check the highlighted fields.'
+                    )
+                  )
+                }
+              })(event)
+            }}
             disabled={isSaving}
           >
             {isSaving ? t('Saving...') : t('Save group settings')}
@@ -228,6 +273,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
             onChange={(field, value) =>
               handleFieldChange(field as keyof GroupFormValues, value)
             }
+            onPricingProblemsChange={handlePricingProblemsChange}
           />
         ) : (
           <SettingsForm onSubmit={form.handleSubmit(onSave)}>
