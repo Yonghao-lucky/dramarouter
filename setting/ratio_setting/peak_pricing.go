@@ -3,6 +3,7 @@ package ratio_setting
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,9 +21,11 @@ import (
 //   - 系数在请求开始时求值一次，预扣与结算都从同一份 PriceData 读取，避免跨时段错账。
 //   - 系数支持纯数字，也支持表达式；表达式可读取配置时区下的 hour / minute / weekday 等变量。
 //   - 未命中任何峰时规则时使用谷时系数（默认 1），规则之间不叠加。
+//   - 节假日日历中的日期，对开启 OffPeakOnHolidays 的规则集全天按谷时计价。
 
 const (
 	PeakPricingDefaultTimezone = "Asia/Shanghai"
+	peakHolidayDateLayout      = "2006-01-02"
 )
 
 // PeakPricingRule 描述一个峰时段。Start/End 为 "HH:MM"，End <= Start 表示跨夜。
@@ -46,6 +49,8 @@ type PeakPricingModelOverride struct {
 	Model   string            `json:"model"` // 精确名称，或以 * 结尾的通配
 	Rules   []PeakPricingRule `json:"rules"`
 	OffPeak PeakPricingRule   `json:"off_peak"`
+	// OffPeakOnHolidays 为 true 时，Holidays 中的日期全天使用 OffPeak 系数。
+	OffPeakOnHolidays bool `json:"off_peak_on_holidays"`
 }
 
 type PeakPricingSetting struct {
@@ -57,6 +62,10 @@ type PeakPricingSetting struct {
 	OffPeak PeakPricingRule `json:"off_peak"`
 	// ModelOverrides 优先于全局 Models/Rules，匹配顺序为配置顺序。
 	ModelOverrides []PeakPricingModelOverride `json:"model_overrides"`
+	// Holidays 是节假日日历（配置时区下的 YYYY-MM-DD），全局规则与各模型覆盖共用。
+	Holidays []string `json:"holidays"`
+	// OffPeakOnHolidays 为 true 时，全局规则在节假日全天使用 OffPeak 系数。
+	OffPeakOnHolidays bool `json:"off_peak_on_holidays"`
 }
 
 // PeakFactors 是某次请求最终采用的系数。
@@ -111,6 +120,9 @@ func UpdatePeakPricingByJSONString(jsonString string) error {
 		return err
 	}
 	setting.Timezone = normalizePeakTimezone(setting.Timezone)
+	for i, date := range setting.Holidays {
+		setting.Holidays[i] = strings.TrimSpace(date)
+	}
 	peakPricingLock.Lock()
 	peakPricingSetting = setting
 	peakPricingLock.Unlock()
@@ -134,6 +146,11 @@ func ValidatePeakPricingSetting(setting PeakPricingSetting) error {
 	for _, name := range setting.Models {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("模型名称不能为空")
+		}
+	}
+	for _, date := range setting.Holidays {
+		if _, err := time.Parse(peakHolidayDateLayout, strings.TrimSpace(date)); err != nil {
+			return fmt.Errorf("节假日日期无效（需要 YYYY-MM-DD）: %s", date)
 		}
 	}
 	rules := make([]PeakPricingRule, 0, len(setting.Rules)+1)
@@ -379,13 +396,18 @@ func GetPeakFactors(modelName string, at time.Time) PeakFactors {
 
 	rules := setting.Rules
 	offPeak := setting.OffPeak
+	offPeakOnHolidays := setting.OffPeakOnHolidays
 	if override, ok := findPeakModelOverride(setting.ModelOverrides, modelName); ok {
 		rules = override.Rules
 		offPeak = override.OffPeak
+		offPeakOnHolidays = override.OffPeakOnHolidays
 	} else if !peakModelMatches(setting.Models, modelName) {
 		return neutral
 	}
 
+	if offPeakOnHolidays && slices.Contains(setting.Holidays, at.In(location).Format(peakHolidayDateLayout)) {
+		return peakFactorsFromRule(offPeak, at)
+	}
 	for _, rule := range rules {
 		if !peakRuleMatches(rule, at, location) {
 			continue
@@ -446,10 +468,13 @@ type PeakWindowView struct {
 
 // PeakPricingView 描述某模型当前生效的峰谷策略，用于模型广场展示。
 type PeakPricingView struct {
-	Timezone string           `json:"timezone"`
-	Source   string           `json:"source"` // model | global
-	Windows  []PeakWindowView `json:"windows"`
-	OffPeak  PeakWindowView   `json:"off_peak"`
+	Timezone          string           `json:"timezone"`
+	Source            string           `json:"source"` // model | global
+	Windows           []PeakWindowView `json:"windows"`
+	OffPeak           PeakWindowView   `json:"off_peak"`
+	OffPeakOnHolidays bool             `json:"off_peak_on_holidays"`
+	// HolidayToday 表示求值时刻处于节假日且本规则集全天按谷时计价。
+	HolidayToday bool `json:"holiday_today"`
 }
 
 // GetModelPeakPricingView 返回模型当前生效的峰谷策略；未启用或不适用时返回 nil。
@@ -463,18 +488,30 @@ func GetModelPeakPricingView(modelName string, at time.Time) *PeakPricingView {
 	if !hasOverride && !peakModelMatches(setting.Models, modelName) {
 		return nil
 	}
+	// 只配置按模型覆盖时，全局没有峰时段且谷时系数全为 1，对其余模型不展示峰谷。
+	if !hasOverride && len(setting.Rules) == 0 && peakFactorsFromRule(setting.OffPeak, at).IsNeutral() {
+		return nil
+	}
 	rules := setting.Rules
 	offPeak := setting.OffPeak
+	offPeakOnHolidays := setting.OffPeakOnHolidays
 	source := "global"
 	if hasOverride {
 		rules = override.Rules
 		offPeak = override.OffPeak
+		offPeakOnHolidays = override.OffPeakOnHolidays
 		source = "model"
 	}
+	location, err := time.LoadLocation(normalizePeakTimezone(setting.Timezone))
+	if err != nil {
+		location = time.UTC
+	}
 	view := &PeakPricingView{
-		Timezone: normalizePeakTimezone(setting.Timezone),
-		Source:   source,
-		Windows:  make([]PeakWindowView, 0, len(rules)),
+		Timezone:          normalizePeakTimezone(setting.Timezone),
+		Source:            source,
+		Windows:           make([]PeakWindowView, 0, len(rules)),
+		OffPeakOnHolidays: offPeakOnHolidays,
+		HolidayToday:      offPeakOnHolidays && slices.Contains(setting.Holidays, at.In(location).Format(peakHolidayDateLayout)),
 	}
 	for _, rule := range rules {
 		view.Windows = append(view.Windows, peakWindowView(rule, at))

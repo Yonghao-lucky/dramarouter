@@ -140,3 +140,66 @@ func TestPeakPricingDisabledReturnsNeutralFactors(t *testing.T) {
 	assert.True(t, factors.IsNeutral())
 	assert.Equal(t, 1.0, factors.Input)
 }
+
+func TestPeakFactorsUseOffPeakAllDayOnCalendarHolidays(t *testing.T) {
+	setupPeakPricing(t, `{
+		"enabled": true,
+		"timezone": "Asia/Shanghai",
+		"holidays": ["2027-01-01"],
+		"model_overrides": [
+			{
+				"model": "deepseek-v4.1-flash-1017",
+				"off_peak_on_holidays": true,
+				"rules": [
+					{"name": "am", "days": [1,2,3,4,5], "start": "09:00", "end": "12:00", "input_factor": "1", "output_factor": "1"}
+				],
+				"off_peak": {"input_factor": "0.5", "output_factor": "0.5", "cache_factor": "0.5"}
+			},
+			{
+				"model": "other-model",
+				"rules": [
+					{"name": "am", "days": [1,2,3,4,5], "start": "09:00", "end": "12:00", "input_factor": "2"}
+				]
+			}
+		]
+	}`)
+
+	tests := []struct {
+		name       string
+		model      string
+		at         string
+		wantRule   string
+		wantInput  float64
+		wantOutput float64
+	}{
+		// 2027-01-01 是周五，落在工作日高峰时段内，但属于节假日。
+		{name: "holiday inside peak window", model: "deepseek-v4.1-flash-1017", at: "2027-01-01 10:00", wantRule: "", wantInput: 0.5, wantOutput: 0.5},
+		{name: "ordinary weekday peak", model: "deepseek-v4.1-flash-1017", at: "2027-01-04 10:00", wantRule: "am", wantInput: 1, wantOutput: 1},
+		{name: "override without holiday opt-in keeps peak", model: "other-model", at: "2027-01-01 10:00", wantRule: "am", wantInput: 2, wantOutput: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			factors := GetPeakFactors(tt.model, shanghaiTime(t, tt.at))
+			assert.Equal(t, tt.wantRule, factors.RuleName)
+			assert.Equal(t, tt.wantInput, factors.Input)
+			assert.Equal(t, tt.wantOutput, factors.Output)
+		})
+	}
+
+	view := GetModelPeakPricingView("deepseek-v4.1-flash-1017", shanghaiTime(t, "2027-01-04 10:00"))
+	require.NotNil(t, view)
+	assert.True(t, view.OffPeakOnHolidays)
+	assert.False(t, view.HolidayToday)
+	holidayView := GetModelPeakPricingView("deepseek-v4.1-flash-1017", shanghaiTime(t, "2027-01-01 10:00"))
+	require.NotNil(t, holidayView)
+	assert.True(t, holidayView.HolidayToday)
+	// 只有按模型覆盖、全局为空时，其他模型不展示峰谷。
+	assert.Nil(t, GetModelPeakPricingView("gpt-unrelated", shanghaiTime(t, "2027-01-04 10:00")))
+}
+
+func TestPeakPricingRejectsMalformedHolidayDates(t *testing.T) {
+	for _, date := range []string{"2027-1-1", "2027/01/01", "2027-02-30", ""} {
+		err := UpdatePeakPricingByJSONString(`{"enabled": true, "holidays": ["` + date + `"]}`)
+		assert.Error(t, err, date)
+	}
+}

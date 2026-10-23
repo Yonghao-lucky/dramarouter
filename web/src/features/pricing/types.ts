@@ -124,6 +124,10 @@ export type PeakPricingView = {
   source: 'model' | 'global' | string
   windows: PeakPricingWindow[]
   off_peak: PeakPricingWindow
+  /** Calendar holidays are billed at off-peak factors all day */
+  off_peak_on_holidays?: boolean
+  /** Today is a calendar holiday for this schedule */
+  holiday_today?: boolean
 }
 
 export type PricingData = {

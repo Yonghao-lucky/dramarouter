@@ -68,6 +68,7 @@ function isWindowActive(window: PeakPricingWindow, now: Date): boolean {
 }
 
 export function isPeakActive(view: PeakPricingView, now = new Date()): boolean {
+  if (view.holiday_today) return false
   return (view.windows ?? []).some((window) => isWindowActive(window, now))
 }
 
@@ -107,9 +108,7 @@ export function ModelPeakPricingBadge(props: { view?: PeakPricingView }) {
       )}
       {active ? t('Peak now') : t('Off-peak now')}
       {!active && hasDiscount && (
-        <span className='font-mono tabular-nums'>
-          {formatFactor(lowest)}
-        </span>
+        <span className='font-mono tabular-nums'>{formatFactor(lowest)}</span>
       )}
     </span>
   )
@@ -160,7 +159,7 @@ export function ModelPeakPricingSection(props: { view?: PeakPricingView }) {
           </thead>
           <tbody>
             {rows.map((window, index) => {
-              const active = isWindowActive(window, now)
+              const active = !view.holiday_today && isWindowActive(window, now)
               return (
                 <tr
                   key={`${window.name}-${index}`}
@@ -208,7 +207,9 @@ export function ModelPeakPricingSection(props: { view?: PeakPricingView }) {
               <td className='px-3 py-2'>
                 {t('Off-peak')}
                 <span className='ml-2 text-[11px]'>
-                  {t('all other times')}
+                  {view.off_peak_on_holidays
+                    ? t('all other times and holidays')
+                    : t('all other times')}
                 </span>
               </td>
               <td className='px-3 py-2 text-right font-mono tabular-nums'>

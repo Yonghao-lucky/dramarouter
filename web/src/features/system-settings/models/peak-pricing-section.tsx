@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -52,6 +53,7 @@ type PeakPricingModelOverride = {
   model: string
   rules: PeakPricingRule[]
   off_peak: PeakPricingRule
+  off_peak_on_holidays: boolean
 }
 
 type PeakPricingSetting = {
@@ -61,6 +63,8 @@ type PeakPricingSetting = {
   rules: PeakPricingRule[]
   off_peak: PeakPricingRule
   model_overrides: PeakPricingModelOverride[]
+  holidays: string[]
+  off_peak_on_holidays: boolean
 }
 
 const EMPTY_RULE: PeakPricingRule = {
@@ -92,6 +96,36 @@ const DAY_PRESETS = [
   { label: 'Weekends', days: [0, 6] },
 ]
 
+// DeepSeek 官方作息：北京时间工作日 9:00-12:00、14:00-18:00 为高峰（原价），
+// 其余时段、周末及法定节假日全天为空闲（半价）。节假日日期在上方日历维护。
+function deepSeekPresetOverride(
+  t: (key: string) => string
+): PeakPricingModelOverride {
+  const peak = (name: string, start: string, end: string) => ({
+    ...EMPTY_RULE,
+    name,
+    days: [1, 2, 3, 4, 5],
+    start,
+    end,
+  })
+  return {
+    model: '',
+    rules: [
+      peak(t('Weekday morning peak'), '09:00', '12:00'),
+      peak(t('Weekday afternoon peak'), '14:00', '18:00'),
+    ],
+    off_peak: {
+      ...EMPTY_RULE,
+      name: 'Off-peak',
+      input_factor: '0.5',
+      output_factor: '0.5',
+      cache_factor: '0.5',
+      cache_write_factor: '0.5',
+    },
+    off_peak_on_holidays: true,
+  }
+}
+
 const WEEKDAYS = [
   { value: 0, label: 'Sun' },
   { value: 1, label: 'Mon' },
@@ -115,6 +149,7 @@ function normalizeOverride(
     model: item?.model ?? '',
     rules: Array.isArray(item?.rules) ? item.rules.map(normalizeRule) : [],
     off_peak: normalizeRule(item?.off_peak),
+    off_peak_on_holidays: item?.off_peak_on_holidays ?? false,
   }
 }
 
@@ -126,6 +161,8 @@ function parseSetting(raw: string | undefined): PeakPricingSetting {
     rules: [],
     off_peak: { ...EMPTY_RULE, name: 'Off-peak' },
     model_overrides: [],
+    holidays: [],
+    off_peak_on_holidays: false,
   }
   if (!raw) return fallback
   try {
@@ -139,6 +176,8 @@ function parseSetting(raw: string | undefined): PeakPricingSetting {
       model_overrides: Array.isArray(parsed.model_overrides)
         ? parsed.model_overrides.map(normalizeOverride)
         : [],
+      holidays: Array.isArray(parsed.holidays) ? parsed.holidays : [],
+      off_peak_on_holidays: parsed.off_peak_on_holidays ?? false,
     }
   } catch {
     return fallback
@@ -155,7 +194,9 @@ function RuleEditor({ rules, onChange, idPrefix }: RuleEditorProps) {
   const { t } = useTranslation()
 
   const patchRule = (index: number, patch: Partial<PeakPricingRule>) => {
-    onChange(rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
+    onChange(
+      rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule))
+    )
   }
 
   return (
@@ -337,6 +378,33 @@ function OffPeakEditor({ rule, onChange }: OffPeakEditorProps) {
   )
 }
 
+type HolidayOffPeakSwitchProps = {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}
+
+function HolidayOffPeakSwitch({
+  checked,
+  onCheckedChange,
+}: HolidayOffPeakSwitchProps) {
+  const { t } = useTranslation()
+  return (
+    <label className='flex items-start justify-between gap-4 rounded-xl border p-4'>
+      <span className='min-w-0'>
+        <span className='block text-sm font-medium'>
+          {t('Off-peak all day on holidays')}
+        </span>
+        <span className='text-muted-foreground mt-0.5 block text-xs'>
+          {t(
+            'Dates in the holiday calendar use the off-peak factors for the whole day, even inside a peak window.'
+          )}
+        </span>
+      </span>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </label>
+  )
+}
+
 type PeakPricingSectionProps = {
   defaultValue?: string
 }
@@ -351,6 +419,7 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
   const initial = useMemo(() => parseSetting(defaultValue), [defaultValue])
   const [setting, setSetting] = useState<PeakPricingSetting>(initial)
   const [modelsText, setModelsText] = useState(initial.models.join('\n'))
+  const [holidaysText, setHolidaysText] = useState(initial.holidays.join('\n'))
 
   const patchOverride = (
     index: number,
@@ -374,6 +443,10 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
       model_overrides: setting.model_overrides.filter((item) =>
         item.model.trim()
       ),
+      holidays: holidaysText
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
     }
     await updateOption.mutateAsync({
       key: 'PeakPricing',
@@ -409,9 +482,10 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
               <Label className='text-xs'>{t('Timezone')}</Label>
               <Select
                 value={setting.timezone}
-                onValueChange={(timezone) =>
+                onValueChange={(timezone) => {
+                  if (!timezone) return
                   setSetting((prev) => ({ ...prev, timezone }))
-                }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -440,6 +514,22 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
                 )}
               </p>
             </div>
+            <div className='flex flex-col gap-1.5 sm:col-span-2'>
+              <Label className='text-xs'>
+                {t('Holiday calendar (one date per line)')}
+              </Label>
+              <Textarea
+                value={holidaysText}
+                onChange={(event) => setHolidaysText(event.target.value)}
+                placeholder='2027-01-01'
+                className='min-h-16 font-mono text-xs'
+              />
+              <p className='text-muted-foreground text-[11px]'>
+                {t(
+                  'Dates in YYYY-MM-DD, in the timezone above. Only rule sets with holiday off-peak turned on use this calendar.'
+                )}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -454,6 +544,13 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
           onChange={(off_peak) => setSetting((prev) => ({ ...prev, off_peak }))}
         />
 
+        <HolidayOffPeakSwitch
+          checked={setting.off_peak_on_holidays}
+          onCheckedChange={(off_peak_on_holidays) =>
+            setSetting((prev) => ({ ...prev, off_peak_on_holidays }))
+          }
+        />
+
         <div className='flex flex-col gap-3'>
           <div className='flex items-center justify-between'>
             <div>
@@ -464,27 +561,50 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
                 )}
               </p>
             </div>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={() =>
-                setSetting((prev) => ({
-                  ...prev,
-                  model_overrides: [
-                    ...prev.model_overrides,
-                    {
-                      model: '',
-                      rules: [],
-                      off_peak: { ...EMPTY_RULE, name: 'Off-peak' },
-                    },
-                  ],
-                }))
-              }
-            >
-              <Plus data-icon='inline-start' />
-              {t('Add model override')}
-            </Button>
+            <div className='flex flex-wrap gap-2'>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                title={t(
+                  'Weekdays 09:00-12:00 and 14:00-18:00 at full price; other times, weekends and calendar holidays at half price.'
+                )}
+                onClick={() =>
+                  setSetting((prev) => ({
+                    ...prev,
+                    model_overrides: [
+                      ...prev.model_overrides,
+                      deepSeekPresetOverride(t),
+                    ],
+                  }))
+                }
+              >
+                <Plus data-icon='inline-start' />
+                {t('Add DeepSeek preset')}
+              </Button>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() =>
+                  setSetting((prev) => ({
+                    ...prev,
+                    model_overrides: [
+                      ...prev.model_overrides,
+                      {
+                        model: '',
+                        rules: [],
+                        off_peak: { ...EMPTY_RULE, name: 'Off-peak' },
+                        off_peak_on_holidays: false,
+                      },
+                    ],
+                  }))
+                }
+              >
+                <Plus data-icon='inline-start' />
+                {t('Add model override')}
+              </Button>
+            </div>
           </div>
 
           {setting.model_overrides.length === 0 && (
@@ -499,7 +619,9 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
             <div key={`override-${index}`} className='rounded-xl border p-4'>
               <div className='flex flex-wrap items-end gap-3'>
                 <div className='flex min-w-48 flex-1 flex-col gap-1'>
-                  <Label className='text-xs'>{t('Model name or pattern')}</Label>
+                  <Label className='text-xs'>
+                    {t('Model name or pattern')}
+                  </Label>
                   <Input
                     value={override.model}
                     onChange={(event) =>
@@ -536,6 +658,12 @@ export function PeakPricingSection({ defaultValue }: PeakPricingSectionProps) {
                 <OffPeakEditor
                   rule={override.off_peak}
                   onChange={(off_peak) => patchOverride(index, { off_peak })}
+                />
+                <HolidayOffPeakSwitch
+                  checked={override.off_peak_on_holidays}
+                  onCheckedChange={(off_peak_on_holidays) =>
+                    patchOverride(index, { off_peak_on_holidays })
+                  }
                 />
               </div>
             </div>
