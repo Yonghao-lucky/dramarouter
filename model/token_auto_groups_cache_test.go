@@ -28,6 +28,38 @@ func TestTokenAutoGroupsRoundTripThroughRedisHashCache(t *testing.T) {
 	assert.Equal(t, []string{"vip", "default"}, groups)
 }
 
+// 鉴权优先读 Redis 缓存；缓存若丢掉厂商顺序，命中缓存的请求会回落到全局 Auto 顺序，
+// 路由到 Key 未选择的分组。
+func TestTokenVendorAutoGroupsRoundTripThroughRedisHashCache(t *testing.T) {
+	useUserCacheMiniRedis(t)
+	token := Token{
+		Id:          43,
+		UserId:      7,
+		Key:         "token-vendor-auto-groups-cache-key",
+		Name:        "vendor-auto-cache",
+		Group:       "auto",
+		RemainQuota: 1234,
+		UsedQuota:   56,
+	}
+	require.NoError(t, token.SetVendorAutoGroups([]VendorAutoGroupOrder{
+		{VendorId: 1, Groups: []string{"claude max-特惠", "claude max"}},
+		{VendorId: 9, Groups: []string{"kimi-tx"}},
+	}))
+
+	require.NoError(t, cacheSetTokenForTest(token))
+	cached, err := cacheGetTokenByKey(token.Key)
+	require.NoError(t, err)
+	orders, err := cached.GetVendorAutoGroups()
+	require.NoError(t, err)
+	assert.Equal(t, []VendorAutoGroupOrder{
+		{VendorId: 1, Groups: []string{"claude max-特惠", "claude max"}},
+		{VendorId: 9, Groups: []string{"kimi-tx"}},
+	}, orders)
+	// 新增字段后参数位置整体后移，额度字段必须仍落在原字段上。
+	assert.Equal(t, 1234, cached.RemainQuota)
+	assert.Equal(t, 56, cached.UsedQuota)
+}
+
 func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 	truncateTables(t)
 	useUserCacheMiniRedis(t)

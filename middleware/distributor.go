@@ -127,7 +127,7 @@ func Distribute() func(c *gin.Context) {
 					if affinitySatisfied {
 						if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetRequestAutoGroups(c, userGroup)
+							autoGroups := service.GetRequestVendorGroups(c, userGroup, modelRequest.Model)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
 									selectGroup = g
@@ -135,6 +135,11 @@ func Distribute() func(c *gin.Context) {
 									channel = preferred
 									affinityUsable = true
 									service.MarkChannelAffinityUsed(c, g, preferred.Id)
+									break
+								}
+								// 亲和只在第一个有可用渠道的分组内生效：故障切换到后面分组后，
+								// 后续请求仍先回到 Key 排在前面的分组，不被亲和长期留在后备分组。
+								if available, _ := model.GetRandomSatisfiedChannel(g, modelRequest.Model, 0, constraints.Filters); available != nil {
 									break
 								}
 							}

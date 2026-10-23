@@ -236,7 +236,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
-			newAPIError = channelErr
+			// 跨分组重试把后面的分组都试完时，返回上一次上游的真实错误，而不是“无可用渠道”。
+			if relayInfo.LastError == nil {
+				newAPIError = channelErr
+			}
 			break
 		}
 		addUsedChannel(c, channel.Id)

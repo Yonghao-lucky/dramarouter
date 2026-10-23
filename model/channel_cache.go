@@ -216,6 +216,41 @@ func GetRandomSatisfiedChannel(
 	return nil, errors.New("channel not found")
 }
 
+// CountSatisfiedChannelPriorities 返回分组内该模型可选渠道的优先级档数。
+// GetRandomSatisfiedChannel 的 retry 超过档数后会停在最低一档，
+// 跨分组重试据此判断当前分组是否已经试完。
+func CountSatisfiedChannelPriorities(group string, model string, filters []dto.ChannelFilter) int {
+	priorities := make(map[int64]struct{})
+	if !common.MemoryCacheEnabled {
+		var abilities []Ability
+		if err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Find(&abilities).Error; err != nil {
+			return 0
+		}
+		for _, ability := range filterAbilitiesByConstraints(abilities, model, filters) {
+			priority := int64(0)
+			if ability.Priority != nil {
+				priority = *ability.Priority
+			}
+			priorities[priority] = struct{}{}
+		}
+		return len(priorities)
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
+	if len(channels) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(model)
+		channels, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], model, filters)
+	}
+	for _, channelId := range channels {
+		if channel, ok := channelsIDM[channelId]; ok {
+			priorities[channel.GetPriority()] = struct{}{}
+		}
+	}
+	return len(priorities)
+}
+
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
 		return GetChannelById(id, true)
