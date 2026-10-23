@@ -975,6 +975,8 @@
     "Billable token breakdown": "计价 Token 明细",
     "Billed as default. No cell for this combination, so the base ratio of default applies — the 0.8 of vip plays no part.": "按 default 计费。矩阵中没有这个组合的格子，因此用 default 的基础倍率——vip 自己的 0.8 不参与。",
     "Billed as premium. The highlighted cell matches, so the override 0.3 applies.": "按 premium 计费。命中高亮的格子，因此使用覆盖倍率 0.3。",
+    "Billed at the peak rate": "按高峰时段价格计费",
+    "Billed at the off-peak rate": "按空闲时段价格计费",
     "Billing": "计费",
     "Billing & Payment": "计费与支付",
     "Billing Details": "计费详情",

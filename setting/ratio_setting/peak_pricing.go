@@ -78,6 +78,13 @@ type PeakFactors struct {
 	CacheWrite5m float64
 	CacheWrite1h float64
 	RuleName     string // 命中的峰时规则名；空表示谷时
+	// Scheduled 表示该模型受峰谷定价管理。峰时系数可以是 1（与基础价相同），
+	// 因此不能只看系数是否中性来判断是否需要记录峰谷信息。
+	Scheduled bool
+	// IsPeak 表示本次请求命中峰时规则；节假日按谷时计费时为 false。
+	IsPeak bool
+	// Holiday 表示按节假日日历走了谷时分支。
+	Holiday bool
 }
 
 // IsNeutral 表示所有系数都是 1，计价链路可以完全跳过折算。
@@ -397,24 +404,37 @@ func GetPeakFactors(modelName string, at time.Time) PeakFactors {
 	rules := setting.Rules
 	offPeak := setting.OffPeak
 	offPeakOnHolidays := setting.OffPeakOnHolidays
+	hasOverride := false
 	if override, ok := findPeakModelOverride(setting.ModelOverrides, modelName); ok {
 		rules = override.Rules
 		offPeak = override.OffPeak
 		offPeakOnHolidays = override.OffPeakOnHolidays
+		hasOverride = true
 	} else if !peakModelMatches(setting.Models, modelName) {
 		return neutral
 	}
+	// 受峰谷管理：按模型覆盖，或全局配置了峰时规则，或全局谷时系数不为 1。
+	// 仅当系数非中性才记录日志会漏掉「峰时系数为 1」的模型，所以单独标记。
+	scheduled := hasOverride || len(rules) > 0 || !peakFactorsFromRule(offPeak, at).IsNeutral()
 
 	if offPeakOnHolidays && slices.Contains(setting.Holidays, at.In(location).Format(peakHolidayDateLayout)) {
-		return peakFactorsFromRule(offPeak, at)
+		factors := peakFactorsFromRule(offPeak, at)
+		factors.Scheduled = scheduled
+		factors.Holiday = true
+		return factors
 	}
 	for _, rule := range rules {
 		if !peakRuleMatches(rule, at, location) {
 			continue
 		}
-		return peakFactorsFromRule(rule, at)
+		factors := peakFactorsFromRule(rule, at)
+		factors.Scheduled = scheduled
+		factors.IsPeak = true
+		return factors
 	}
-	return peakFactorsFromRule(offPeak, at)
+	factors := peakFactorsFromRule(offPeak, at)
+	factors.Scheduled = scheduled
+	return factors
 }
 
 // peakFactorsFromRule 求值单条规则的系数；未单独配置的 5m/1h 缓存写入沿用 CacheWriteFactor。

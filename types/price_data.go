@@ -16,6 +16,8 @@ type GroupRatioInfo struct {
 // PeakPricingInfo 记录本次请求生效的峰谷系数，供日志与排查使用。
 type PeakPricingInfo struct {
 	RuleName     string
+	IsPeak       bool
+	Holiday      bool
 	Input        float64
 	Output       float64
 	Cache        float64

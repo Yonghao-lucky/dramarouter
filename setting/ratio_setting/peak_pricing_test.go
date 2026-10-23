@@ -171,11 +171,14 @@ func TestPeakFactorsUseOffPeakAllDayOnCalendarHolidays(t *testing.T) {
 		wantRule   string
 		wantInput  float64
 		wantOutput float64
+		wantPeak   bool
+		wantHol    bool
 	}{
 		// 2027-01-01 是周五，落在工作日高峰时段内，但属于节假日。
-		{name: "holiday inside peak window", model: "deepseek-v4.1-flash-1017", at: "2027-01-01 10:00", wantRule: "", wantInput: 0.5, wantOutput: 0.5},
-		{name: "ordinary weekday peak", model: "deepseek-v4.1-flash-1017", at: "2027-01-04 10:00", wantRule: "am", wantInput: 1, wantOutput: 1},
-		{name: "override without holiday opt-in keeps peak", model: "other-model", at: "2027-01-01 10:00", wantRule: "am", wantInput: 2, wantOutput: 1},
+		{name: "holiday inside peak window", model: "deepseek-v4.1-flash-1017", at: "2027-01-01 10:00", wantRule: "", wantInput: 0.5, wantOutput: 0.5, wantHol: true},
+		// 峰时系数为 1 也必须标记为峰时，否则日志无法区分「原价」和「未启用峰谷」。
+		{name: "ordinary weekday peak", model: "deepseek-v4.1-flash-1017", at: "2027-01-04 10:00", wantRule: "am", wantInput: 1, wantOutput: 1, wantPeak: true},
+		{name: "override without holiday opt-in keeps peak", model: "other-model", at: "2027-01-01 10:00", wantRule: "am", wantInput: 2, wantOutput: 1, wantPeak: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,8 +186,16 @@ func TestPeakFactorsUseOffPeakAllDayOnCalendarHolidays(t *testing.T) {
 			assert.Equal(t, tt.wantRule, factors.RuleName)
 			assert.Equal(t, tt.wantInput, factors.Input)
 			assert.Equal(t, tt.wantOutput, factors.Output)
+			assert.True(t, factors.Scheduled)
+			assert.Equal(t, tt.wantPeak, factors.IsPeak)
+			assert.Equal(t, tt.wantHol, factors.Holiday)
 		})
 	}
+
+	// 不在峰谷管理范围内的模型不记录峰谷信息，避免日志里出现无意义的 1x。
+	unmanaged := GetPeakFactors("gpt-unrelated", shanghaiTime(t, "2027-01-04 10:00"))
+	assert.False(t, unmanaged.Scheduled)
+	assert.True(t, unmanaged.IsNeutral())
 
 	view := GetModelPeakPricingView("deepseek-v4.1-flash-1017", shanghaiTime(t, "2027-01-04 10:00"))
 	require.NotNil(t, view)

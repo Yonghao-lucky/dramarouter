@@ -166,8 +166,14 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 			cacheCreationRatio5m = cacheCreationRatio5m * peakFactors.CacheWrite5m / peakFactors.Input
 			cacheCreationRatio1h = cacheCreationRatio1h * peakFactors.CacheWrite1h / peakFactors.Input
 			audioCompletionRatio = audioCompletionRatio * peakFactors.Output / peakFactors.Input
+		}
+		// 峰时系数可能正好是 1（等价于基础价），此时倍率无需折算，
+		// 但日志仍要记录本次是峰时还是谷时，便于用户核对优惠。
+		if peakFactors.Scheduled {
 			peakPricingInfo = &hosttypes.PeakPricingInfo{
 				RuleName:     peakFactors.RuleName,
+				IsPeak:       peakFactors.IsPeak,
+				Holiday:      peakFactors.Holiday,
 				Input:        peakFactors.Input,
 				Output:       peakFactors.Output,
 				Cache:        peakFactors.Cache,

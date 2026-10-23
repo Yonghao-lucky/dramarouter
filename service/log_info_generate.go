@@ -82,6 +82,8 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if peak := relayInfo.PriceData.PeakPricing; peak != nil {
 		other["peak_pricing"] = map[string]interface{}{
 			"rule":        peak.RuleName,
+			"is_peak":     peak.IsPeak,
+			"holiday":     peak.Holiday,
 			"input":       peak.Input,
 			"output":      peak.Output,
 			"cache":       peak.Cache,

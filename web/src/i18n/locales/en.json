@@ -962,6 +962,8 @@
     "Billable token breakdown": "Billable token breakdown",
     "Billed as default. No cell for this combination, so the base ratio of default applies — the 0.8 of vip plays no part.": "Billed as default. No cell for this combination, so the base ratio of default applies — the 0.8 of vip plays no part.",
     "Billed as premium. The highlighted cell matches, so the override 0.3 applies.": "Billed as premium. The highlighted cell matches, so the override 0.3 applies.",
+    "Billed at the peak rate": "Billed at the peak rate",
+    "Billed at the off-peak rate": "Billed at the off-peak rate",
     "Billing": "Billing",
     "Billing & Payment": "Billing & Payment",
     "Billing Details": "Billing Details",

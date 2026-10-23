@@ -226,6 +226,19 @@ export interface LogOtherData {
   po?: string[]
   billing_source?: string
   group?: string
+  // Peak/off-peak pricing applied to this request, written by the backend when
+  // the model is covered by a peak pricing rule set. is_peak is absent on logs
+  // recorded before that flag existed; there a non-empty rule meant a peak
+  // match, so older rows fall back to rule presence.
+  peak_pricing?: {
+    rule?: string
+    is_peak?: boolean
+    holiday?: boolean
+    input?: number
+    output?: number
+    cache?: number
+    cache_write?: number
+  }
   stream_status?: {
     status?: string
     end_reason?: string

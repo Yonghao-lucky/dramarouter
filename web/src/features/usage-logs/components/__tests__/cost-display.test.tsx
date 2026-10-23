@@ -80,4 +80,62 @@ describe('log cost display', () => {
       screen.getByRole('img', { name: 'Includes tool-call surcharge' })
     ).toHaveAttribute('data-tool-surcharge-indicator', 'true')
   })
+
+  test('marks an off-peak request with the applied discount factor', () => {
+    const rendered = renderCost({
+      quota: 4,
+      other: {
+        peak_pricing: {
+          is_peak: false,
+          input: 0.5,
+          output: 0.5,
+          cache: 0.5,
+        },
+      },
+    })
+
+    expect(
+      rendered.container.querySelector('[data-peak-pricing-indicator]')
+    ).toHaveAttribute('data-peak-pricing-indicator', 'off-peak')
+  })
+
+  test('marks a peak request even when the peak factor equals the base price', () => {
+    const rendered = renderCost({
+      quota: 8,
+      other: {
+        peak_pricing: {
+          rule: 'am',
+          is_peak: true,
+          input: 1,
+          output: 1,
+          cache: 1,
+        },
+      },
+    })
+
+    const marker = rendered.container.querySelector(
+      '[data-peak-pricing-indicator]'
+    )
+    expect(marker).toHaveAttribute('data-peak-pricing-indicator', 'peak')
+    expect(normalizedText(marker?.textContent ?? '')).toContain('1x')
+  })
+
+  test('falls back to rule presence for logs written before is_peak existed', () => {
+    const rendered = renderCost({
+      quota: 8,
+      other: { peak_pricing: { rule: 'am', input: 2, output: 2 } },
+    })
+
+    expect(
+      rendered.container.querySelector('[data-peak-pricing-indicator]')
+    ).toHaveAttribute('data-peak-pricing-indicator', 'peak')
+  })
+
+  test('omits the peak marker for models outside peak pricing', () => {
+    const rendered = renderCost({ quota: 8, other: {} })
+
+    expect(
+      rendered.container.querySelector('[data-peak-pricing-indicator]')
+    ).toBeNull()
+  })
 })

@@ -419,6 +419,20 @@ function BillingBreakdown(props: {
     })
   }
 
+  const peak = other.peak_pricing
+  if (peak) {
+    const peakIsPeak = peak.is_peak ?? Boolean(peak.rule)
+    const parts = [
+      `${t('Input')} ${formatRatio(peak.input)}x`,
+      `${t('Output')} ${formatRatio(peak.output)}x`,
+      `${t('Cache read')} ${formatRatio(peak.cache)}x`,
+    ]
+    rows.push({
+      label: t('Peak & Off-peak Pricing'),
+      value: `${peakIsPeak ? t('Peak') : t('Off-peak')}${peak.holiday ? ` · ${t('Off-peak all day on holidays')}` : ''} · ${parts.join(' · ')}`,
+    })
+  }
+
   rows.push({
     label: t('Total Cost'),
     value: formatLogQuota(log.quota),
