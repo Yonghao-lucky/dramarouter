@@ -26,6 +26,15 @@ type PeakPricingInfo struct {
 	CacheWrite1h float64
 }
 
+// ImageResolutionInfo 记录图片按分辨率计费命中的档位，供日志与排查使用。
+type ImageResolutionInfo struct {
+	TierName string
+	Width    int
+	Height   int
+	Size     string
+	Price    float64
+}
+
 type PriceData struct {
 	FreeModel            bool
 	ModelPrice           float64
@@ -44,6 +53,7 @@ type PriceData struct {
 	QuotaToPreConsume    int // 按量计费的预消耗额度
 	GroupRatioInfo       GroupRatioInfo
 	PeakPricing          *PeakPricingInfo
+	ImageResolution      *ImageResolutionInfo
 }
 
 func (p *PriceData) AddOtherRatio(key string, ratio float64) {

@@ -48,6 +48,7 @@ const defaultBillingSettings: BillingSettings = {
   AudioRatio: '',
   AudioCompletionRatio: '',
   PeakPricing: '',
+  ImageResolutionPricing: '',
   ExposeRatioEnabled: false,
   'billing_setting.billing_mode': '{}',
   'billing_setting.billing_expr': '{}',

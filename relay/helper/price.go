@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -16,6 +17,7 @@ import (
 	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func modelPriceNotConfiguredError(modelName string, userId int) error {
@@ -106,6 +108,33 @@ func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *host
 	}
 }
 
+// imageResolutionSize 取出本次请求的出图尺寸。
+// 图片接口走 ImageRequest；chat/completions 生图把 size 放在通用请求里；
+// 两者都没拿到时回落到原始请求体的 size 字段。
+func imageResolutionSize(c *gin.Context, info *relaycommon.RelayInfo, meta *types.TokenCountMeta) string {
+	if meta != nil && strings.TrimSpace(meta.ImageSize) != "" {
+		return meta.ImageSize
+	}
+	if info != nil && info.Request != nil {
+		switch request := info.Request.(type) {
+		case *dto.ImageRequest:
+			if strings.TrimSpace(request.Size) != "" {
+				return request.Size
+			}
+		case *dto.GeneralOpenAIRequest:
+			if strings.TrimSpace(request.Size) != "" {
+				return request.Size
+			}
+		}
+	}
+	// chat/completions 生图场景下请求体里才有 size；仅在模型配置了分辨率档位时读取。
+	body, err := readIncomingBillingExprBody(c)
+	if err != nil || len(body) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(gjson.GetBytes(body, "size").String())
+}
+
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (hosttypes.PriceData, error) {
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 
@@ -114,6 +143,23 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	// Check if this model uses tiered_expr billing
 	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModeTieredExpr {
 		return modelPriceHelperTiered(c, info, promptTokens, meta, groupRatioInfo)
+	}
+
+	// 图片按分辨率计费：命中档位时以档位价作为本次按次单价。
+	// 该价格随后与 n、分组倍率、峰谷系数叠加，预扣与结算读同一份 PriceData。
+	var imageResolutionInfo *hosttypes.ImageResolutionInfo
+	if ratio_setting.HasImageResolutionPricing(info.OriginModelName) {
+		if matched, ok := ratio_setting.MatchImageResolutionPrice(info.OriginModelName, imageResolutionSize(c, info, meta)); ok {
+			modelPrice = matched.Price
+			usePrice = true
+			imageResolutionInfo = &hosttypes.ImageResolutionInfo{
+				TierName: matched.TierName,
+				Width:    matched.Width,
+				Height:   matched.Height,
+				Size:     matched.Size,
+				Price:    matched.Price,
+			}
+		}
 	}
 
 	var preConsumedQuota int
@@ -190,7 +236,8 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 		preConsumedQuota = quota
 	} else {
-		if meta.ImagePriceRatio != 0 {
+		// 分辨率档位价已经是最终按次单价，不再叠加 dall-e 的尺寸倍率。
+		if meta.ImagePriceRatio != 0 && imageResolutionInfo == nil {
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
 	}
@@ -230,6 +277,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		CacheCreation1hRatio: cacheCreationRatio1h,
 		QuotaToPreConsume:    preConsumedQuota,
 		PeakPricing:          peakPricingInfo,
+		ImageResolution:      imageResolutionInfo,
 	}
 	if usePrice {
 		for name, ratio := range meta.BillingRatios {

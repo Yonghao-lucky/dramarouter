@@ -22,6 +22,7 @@ import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
+import { ImageResolutionPricingSection } from '../models/image-resolution-pricing-section'
 import { PeakPricingSection } from '../models/peak-pricing-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
@@ -135,6 +136,15 @@ const BILLING_SECTIONS = [
     titleKey: 'Peak & Off-peak Pricing',
     build: (settings: BillingSettings) => (
       <PeakPricingSection defaultValue={settings.PeakPricing} />
+    ),
+  },
+  {
+    id: 'image-resolution-pricing',
+    titleKey: 'Image Resolution Pricing',
+    build: (settings: BillingSettings) => (
+      <ImageResolutionPricingSection
+        defaultValue={settings.ImageResolutionPricing}
+      />
     ),
   },
   {

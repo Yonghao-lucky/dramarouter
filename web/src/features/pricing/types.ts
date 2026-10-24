@@ -74,6 +74,8 @@ export type PricingModel = {
   pricing_version?: string
   /** Peak / off-peak windows currently in effect for this model */
   peak_pricing?: PeakPricingView
+  /** Per-resolution per-image pricing table, when configured */
+  image_resolution_pricing?: ImageResolutionPricingView
   /**
    * Optional model metadata fields reserved for backend-provided catalog data.
    * Keep them data-driven; do not synthesize display values on the client.
@@ -128,6 +130,18 @@ export type PeakPricingView = {
   off_peak_on_holidays?: boolean
   /** Today is a calendar holiday for this schedule */
   holiday_today?: boolean
+}
+
+export type ImageResolutionTierView = {
+  name: string
+  max_pixels: number
+  price: number
+}
+
+/** Per-image prices keyed by requested resolution; absent when the model is flat-priced. */
+export type ImageResolutionPricingView = {
+  tiers: ImageResolutionTierView[]
+  default_price?: number
 }
 
 export type PricingData = {

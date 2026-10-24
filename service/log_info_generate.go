@@ -90,6 +90,15 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 			"cache_write": peak.CacheWrite,
 		}
 	}
+	if resolution := relayInfo.PriceData.ImageResolution; resolution != nil {
+		other["image_resolution"] = map[string]interface{}{
+			"tier":   resolution.TierName,
+			"size":   resolution.Size,
+			"width":  resolution.Width,
+			"height": resolution.Height,
+			"price":  resolution.Price,
+		}
+	}
 	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort

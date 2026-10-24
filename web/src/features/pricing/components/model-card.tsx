@@ -34,8 +34,9 @@ import { isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
-import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
+import { ModelImageResolutionBadge } from './model-image-resolution-pricing'
 import { ModelPeakPricingBadge } from './model-peak-pricing'
+import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
 
 export interface ModelCardProps {
   model: PricingModel
@@ -256,6 +257,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           )}
           <ModelBillingModeBadge model={props.model} />
           <ModelPeakPricingBadge view={props.model.peak_pricing} />
+          <ModelImageResolutionBadge
+            view={props.model.image_resolution_pricing}
+          />
         </div>
         <ModelPerfBadge perf={props.perf} className='row-span-2 self-start' />
 

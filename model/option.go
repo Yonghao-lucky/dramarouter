@@ -170,6 +170,7 @@ func InitOptionMap() {
 	common.OptionMap["AudioRatio"] = ratio_setting.AudioRatio2JSONString()
 	common.OptionMap["AudioCompletionRatio"] = ratio_setting.AudioCompletionRatio2JSONString()
 	common.OptionMap["PeakPricing"] = ratio_setting.PeakPricing2JSONString()
+	common.OptionMap["ImageResolutionPricing"] = ratio_setting.ImageResolutionPricing2JSONString()
 	common.OptionMap["TopUpLink"] = common.TopUpLink
 	//common.OptionMap["ChatLink"] = common.ChatLink
 	//common.OptionMap["ChatLink2"] = common.ChatLink2
@@ -260,6 +261,16 @@ func validateOptionValue(key string, value string) error {
 			return err
 		}
 		return ratio_setting.ValidatePeakPricingSetting(peakSetting)
+	}
+	if key == "ImageResolutionPricing" {
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		var resolutionSetting ratio_setting.ImageResolutionPricingSetting
+		if err := common.Unmarshal([]byte(value), &resolutionSetting); err != nil {
+			return err
+		}
+		return ratio_setting.ValidateImageResolutionPricingSetting(resolutionSetting)
 	}
 	return nil
 }
@@ -666,6 +677,8 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateAudioCompletionRatioByJSONString(value)
 	case "PeakPricing":
 		err = ratio_setting.UpdatePeakPricingByJSONString(value)
+	case "ImageResolutionPricing":
+		err = ratio_setting.UpdateImageResolutionPricingByJSONString(value)
 	case "TopUpLink":
 		common.TopUpLink = value
 	//case "ChatLink":

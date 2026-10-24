@@ -39,8 +39,9 @@ type Pricing struct {
 	BillingExpr            string                               `json:"billing_expr,omitempty"`
 	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
 	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
-	PeakPricing            *ratio_setting.PeakPricingView       `json:"peak_pricing,omitempty"`
-	PricingVersion         string                               `json:"pricing_version,omitempty"`
+	PeakPricing            *ratio_setting.PeakPricingView            `json:"peak_pricing,omitempty"`
+	ImageResolution        *ratio_setting.ImageResolutionPricingView `json:"image_resolution_pricing,omitempty"`
+	PricingVersion         string                                    `json:"pricing_version,omitempty"`
 }
 
 type PricingVendor struct {
@@ -468,6 +469,7 @@ func updatePricing() {
 			}
 		}
 		pricing.PeakPricing = ratio_setting.GetModelPeakPricingView(model, time.Now())
+		pricing.ImageResolution = ratio_setting.GetModelImageResolutionPricingView(model)
 		pricingMap = append(pricingMap, pricing)
 	}
 
