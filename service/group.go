@@ -1,6 +1,7 @@
 package service
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -157,12 +158,82 @@ func GetRequestVendorGroups(c *gin.Context, userGroup string, modelName string) 
 	return resolveFallback()
 }
 
+// GetRequestAutoGroupCandidates 返回当前令牌在聚合分组下可以走到的全部分组：
+// Token/全局 Auto 列表，加上各厂商顺序中出现过的分组。
+// 后者只用于模型列表展示，实际路由仍由 GetRequestVendorGroups 逐模型解析。
+func GetRequestAutoGroupCandidates(c *gin.Context, userGroup string) []string {
+	candidates := GetRequestAutoGroups(c, userGroup)
+	value, ok := common.GetContextKey(c, constant.ContextKeyTokenVendorAutoGroups)
+	if !ok {
+		return candidates
+	}
+	orders, ok := value.([]model.VendorAutoGroupOrder)
+	if !ok || len(orders) == 0 {
+		return candidates
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	for _, group := range candidates {
+		seen[group] = struct{}{}
+	}
+	for _, order := range orders {
+		// 与路由侧一致：每个厂商顺序先过一遍用户权限与数量上限。
+		for _, group := range FilterUserTokenAutoGroups(userGroup, order.Groups) {
+			if _, exists := seen[group]; exists {
+				continue
+			}
+			seen[group] = struct{}{}
+			candidates = append(candidates, group)
+		}
+	}
+	return candidates
+}
+
+// FilterModelsByVendorRoute 只保留当前令牌厂商顺序下确实可达的模型。
+// 分组里启用了模型，不代表该模型在厂商顺序指向的分组里也有渠道；
+// 这种模型列进 /v1/models 后必然调用失败，因此按逐模型解析结果过滤。
+// 未配置厂商顺序的令牌原样返回，行为不变。
+func FilterModelsByVendorRoute(c *gin.Context, userGroup string, modelNames []string) []string {
+	value, ok := common.GetContextKey(c, constant.ContextKeyTokenVendorAutoGroups)
+	if !ok {
+		return modelNames
+	}
+	orders, ok := value.([]model.VendorAutoGroupOrder)
+	if !ok || len(orders) == 0 {
+		return modelNames
+	}
+	filtered := make([]string, 0, len(modelNames))
+	for _, modelName := range modelNames {
+		routes := GetRequestVendorGroups(c, userGroup, modelName)
+		if len(routes) == 0 {
+			continue
+		}
+		enableGroups := model.GetModelEnableGroups(modelName)
+		if len(enableGroups) == 0 {
+			// 定价缓存尚未覆盖该模型时无法判断可达性，保留以免误删。
+			filtered = append(filtered, modelName)
+			continue
+		}
+		reachable := slices.ContainsFunc(routes, func(route string) bool {
+			return slices.Contains(enableGroups, route)
+		})
+		if reachable {
+			filtered = append(filtered, modelName)
+		}
+	}
+	return filtered
+}
+
 // GetGroupsEnabledModels 按 groups 顺序获取各分组启用的模型并去重
 func GetGroupsEnabledModels(groups []string) []string {
+	modelsByGroup, err := model.GetGroupEnabledModelsMap(groups)
+	if err != nil {
+		common.SysError("failed to load enabled models by group: " + err.Error())
+		return []string{}
+	}
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
 	for _, group := range groups {
-		for _, modelName := range model.GetGroupEnabledModels(group) {
+		for _, modelName := range modelsByGroup[group] {
 			if _, ok := seen[modelName]; !ok {
 				seen[modelName] = struct{}{}
 				models = append(models, modelName)

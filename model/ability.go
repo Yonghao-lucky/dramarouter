@@ -47,6 +47,33 @@ func GetGroupEnabledModels(group string) []string {
 	return models
 }
 
+// GetGroupEnabledModelsMap 一次查询取回多个分组各自启用的模型，避免按分组逐个查库。
+// 返回值只包含至少有一个启用模型的分组。
+func GetGroupEnabledModelsMap(groups []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(groups))
+	if len(groups) == 0 {
+		return result, nil
+	}
+
+	type row struct {
+		Model      string `gorm:"column:model"`
+		ModelGroup string `gorm:"column:model_group"`
+	}
+	var rows []row
+	err := DB.Table("abilities").
+		Select("DISTINCT abilities.model as model, abilities."+commonGroupCol+" as model_group").
+		Where("abilities."+commonGroupCol+" IN ? and abilities.enabled = ?", groups, true).
+		Order("abilities.model ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		result[r.ModelGroup] = append(result[r.ModelGroup], r.Model)
+	}
+	return result, nil
+}
+
 func GetEnabledModels() []string {
 	var models []string
 	// Find distinct models

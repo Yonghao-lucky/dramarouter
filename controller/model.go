@@ -201,7 +201,7 @@ func getModelListGroups(c *gin.Context) (modelListGroups, error) {
 		return modelListGroups{
 			userGroup:   userGroup,
 			tokenGroup:  tokenGroup,
-			ownerGroups: service.GetRequestAutoGroups(c, userGroup),
+			ownerGroups: service.GetRequestAutoGroupCandidates(c, userGroup),
 		}, nil
 	}
 
@@ -246,6 +246,10 @@ func availableOpenAIModels(c *gin.Context) ([]dto.OpenAIModels, error) {
 		}
 	}
 	models := service.GetGroupsEnabledModels(ownerGroups)
+	// 聚合 Key 的模型列表要按厂商顺序过滤：分组里勾选了模型不代表请求时一定能路由到。
+	if groups.tokenGroup == "auto" {
+		models = service.FilterModelsByVendorRoute(c, groups.userGroup, models)
+	}
 	for _, modelName := range models {
 		if modelLimitEnable {
 			matchingName := ratio_setting.FormatMatchingModelName(modelName)
