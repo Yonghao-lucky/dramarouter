@@ -403,11 +403,29 @@ function h3HasVisualContent(content) {
 // aspect ratio can be inherited from a visual input.
 function h3Ratio(req, content) {
   const metadata = req.metadata || {};
-  const ratio = trimmed(metadata.ratio);
-  if (!ratio) return h3HasVisualContent(content) ? "adaptive" : "16:9";
+  const ratio = trimmed(metadata.ratio).toLowerCase();
+  // MiniMax rejects `adaptive` on this contract (it answers with a 400 naming
+  // the supported combinations), so an omitted ratio must still be concrete.
+  if (!ratio) return "16:9";
+  if (ratio === "adaptive") return h3HasVisualContent(content) ? "adaptive" : "16:9";
   if (!H3_RATIOS.includes(ratio)) throw new Error(H3_MODEL + " ratio must be one of " + H3_RATIOS.join(", "));
-  if (ratio === "adaptive" && !h3HasVisualContent(content)) throw new Error(H3_MODEL + " ratio adaptive requires an image or video input");
   return ratio;
+}
+
+// The upstream accepts a narrower ratio set than the published enum: 768P adds
+// 1:1, while 1080P and 2K only allow 16:9 and 9:16. Validating here turns an
+// opaque upstream 400 into a message that names the accepted values.
+const H3_RATIOS_BY_RESOLUTION = {
+  "768P": ["16:9", "9:16", "1:1"],
+  "1080P": ["16:9", "9:16"],
+  "2K": ["16:9", "9:16"],
+};
+
+function h3ValidateRatioForResolution(resolution, ratio) {
+  if (ratio === "adaptive") return;
+  const allowed = H3_RATIOS_BY_RESOLUTION[resolution];
+  if (!allowed || allowed.indexOf(ratio) >= 0) return;
+  throw new Error(H3_MODEL + " " + resolution + " supports ratio " + allowed.join(", "));
 }
 
 function h3QueryTask(body) {
@@ -566,13 +584,16 @@ export function buildSubmitRequest(ctx) {
   const metadata = req.metadata || {};
   if (isH3(model)) {
     const content = h3Content(req);
+    const resolution = h3Resolution(req);
+    const ratio = h3Ratio(req, content);
+    h3ValidateRatioForResolution(resolution, ratio);
     const h3Body = Object.assign(
       {
         model: model,
         content: content,
-        resolution: h3Resolution(req),
+        resolution: resolution,
         duration: h3Duration(req),
-        ratio: h3Ratio(req, content),
+        ratio: ratio,
       },
       definedFields(metadata, H3_METADATA_FIELDS)
     );

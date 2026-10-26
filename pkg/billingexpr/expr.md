@@ -77,6 +77,7 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 |----------|-----------|---------|
 | `tier` | `tier(name, value) → float64` | Records which pricing tier matched; must wrap the cost expression |
 | `param` | `param(path) → any` | Reads a JSON path from the request body (uses gjson) |
+| `number` | `number(value, fallback) → float64` | Coerces an optional value to a number; `nil`, `""` and non-numeric strings yield `fallback`. Use it instead of arithmetics on `param`/`u`, which fails on a missing value |
 | `header` | `header(key) → string` | Reads a request header value |
 | `has` | `has(source, substr) → bool` | Substring check |
 | `hour` | `hour(tz) → int` | Current hour in timezone (0-23) |
