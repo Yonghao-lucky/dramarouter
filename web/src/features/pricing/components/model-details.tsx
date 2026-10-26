@@ -80,6 +80,7 @@ import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
 import { ModelImageResolutionSection } from './model-image-resolution-pricing'
+import { ModelTaskUsagePricingSection } from './model-task-usage-pricing'
 import { ModelPeakPricingSection } from './model-peak-pricing'
 
 // ----------------------------------------------------------------------------
@@ -1196,6 +1197,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
             <ModelPeakPricingSection view={props.model.peak_pricing} />
             <ModelImageResolutionSection
               view={props.model.image_resolution_pricing}
+            />
+            <ModelTaskUsagePricingSection
+              schema={props.model.billing_usage_schema}
+              billingExpr={props.model.billing_expr}
             />
           </section>
 

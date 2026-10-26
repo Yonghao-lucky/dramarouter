@@ -403,7 +403,11 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		Len: float64(promptTokens),
 	}, requestInput)
 	if err != nil {
-		return hosttypes.PriceData{}, fmt.Errorf("model %s tiered expr run failed: %w", info.OriginModelName, err)
+		// expr-lang reports the offending source line with the whole expression,
+		// so the raw error would hand the administrator's pricing rules to the
+		// caller. Keep the detail in the server log and answer generically.
+		common.SysError(fmt.Sprintf("model %s tiered expr run failed: %v", info.OriginModelName, err))
+		return hosttypes.PriceData{}, fmt.Errorf("model %s billing expression failed; contact the administrator", info.OriginModelName)
 	}
 
 	// Expression coefficients are $/1M tokens prices; convert to quota the same way per-call billing does.

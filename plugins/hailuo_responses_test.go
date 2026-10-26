@@ -148,7 +148,7 @@ func TestHailuoH3SubmitsToV2(t *testing.T) {
 }
 
 // Each model family bills only the dimensions it renders, so MiniMax-H3 shows
-// its 768P/2K tiers and input media while the 01 series bills seconds alone.
+// its 768P/1080P/2K tiers and input media while the 01 series bills seconds alone.
 func TestHailuoUsageProfilesPerModel(t *testing.T) {
 	plugin := loadHailuoPlugin(t)
 	families := []struct {
@@ -156,7 +156,7 @@ func TestHailuoUsageProfilesPerModel(t *testing.T) {
 		fields      []string
 		resolutions []string
 	}{
-		{[]string{"MiniMax-H3"}, []string{"input_images", "input_video_seconds", "resolution", "seconds"}, []string{"768P", "2K"}},
+		{[]string{"MiniMax-H3"}, []string{"input_images", "input_video_seconds", "resolution", "seconds"}, []string{"768P", "1080P", "2K"}},
 		{[]string{"MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast"}, []string{"resolution", "seconds"}, []string{"768P", "1080P"}},
 		{[]string{"MiniMax-Hailuo-02"}, []string{"resolution", "seconds"}, []string{"512P", "768P", "1080P"}},
 		{[]string{"T2V-01-Director", "T2V-01", "I2V-01-Director", "I2V-01-live", "I2V-01", "S2V-01"}, []string{"seconds"}, nil},
@@ -177,7 +177,7 @@ func TestHailuoUsageProfilesPerModel(t *testing.T) {
 
 	// Lookup is case-insensitive and an undeclared model keeps the defaults.
 	schema, _ := plugin.Meta.UsageForModels("minimax-h3")
-	assert.Equal(t, []string{"768P", "2K"}, schema["resolution"].Enum)
+	assert.Equal(t, []string{"768P", "1080P", "2K"}, schema["resolution"].Enum)
 	schema, _ = plugin.Meta.UsageForModels("unknown-model")
 	assert.Equal(t, plugin.Meta.UsageSchema, schema)
 }

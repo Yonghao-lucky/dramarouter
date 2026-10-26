@@ -772,10 +772,17 @@ type ApiCategory = 'reasoning' | 'embedding' | 'image' | 'video' | 'chat'
  * need to distinguish them so the request-parameter table is accurate.
  */
 function apiCategoryOf(model: PricingModel): ApiCategory {
+  // A model that declares the video endpoint is a video model whatever its name
+  // looks like; the name heuristics below only fill in when no endpoint is set.
+  if ((model.supported_endpoint_types ?? []).includes('openai-video')) {
+    return 'video'
+  }
   const profile = PROFILE_BY_NAME(model.model_name)
   if (profile === 'embedding' || profile === 'reasoning') return profile
   if (profile === 'image') {
-    return /sora|veo|kling|pika|video|wan-|hunyuanvideo/i.test(model.model_name)
+    return /sora|veo|kling|pika|video|minimax-h3|wan-|hunyuanvideo/i.test(
+      model.model_name
+    )
       ? 'video'
       : 'image'
   }

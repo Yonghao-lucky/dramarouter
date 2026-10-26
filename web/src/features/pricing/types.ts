@@ -76,6 +76,10 @@ export type PricingModel = {
   peak_pricing?: PeakPricingView
   /** Per-resolution per-image pricing table, when configured */
   image_resolution_pricing?: ImageResolutionPricingView
+  /** Usage dimensions a task-plugin model bills on (seconds, resolution, ...) */
+  billing_usage_schema?: BillingUsageSchema
+  /** Representative usage combinations published by the task plugin */
+  billing_usage_examples?: BillingUsageExample[]
   /**
    * Optional model metadata fields reserved for backend-provided catalog data.
    * Keep them data-driven; do not synthesize display values on the client.

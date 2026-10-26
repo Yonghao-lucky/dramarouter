@@ -288,7 +288,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 			if runErr == nil {
 				runErr = fmt.Errorf("negative task expression result")
 			}
-			return nil, service.TaskErrorWrapper(runErr, "model_price_error", http.StatusBadRequest)
+			// The expression source ends up verbatim in expr-lang errors, so the
+			// client only gets a stable message and the detail stays in the log.
+			common.SysError(fmt.Sprintf("task model %s usage expression failed: %v", modelName, runErr))
+			return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s billing expression failed; contact the administrator", modelName), "model_price_error", http.StatusBadRequest)
 		}
 		groupRatioInfo := helper.HandleGroupRatio(c, info)
 		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)

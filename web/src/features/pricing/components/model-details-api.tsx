@@ -47,6 +47,7 @@ import {
   type SupportedParameter,
 } from '../lib/mock-stats'
 import { replaceModelInPath } from '../lib/model-helpers'
+import { videoUsageDoc } from '../lib/video-usage-docs'
 import type { PricingModel } from '../types'
 
 // ---------------------------------------------------------------------------
@@ -423,6 +424,102 @@ function buildImageSample(lang: Lang, ctx: SampleContext): string {
   ].join('\n')
 }
 
+function buildVideoSample(lang: Lang, ctx: SampleContext): string {
+  const url = `${ctx.baseUrl}${ctx.endpointPath}`
+  const prompt = 'A cat playing piano on a rainy neon street.'
+
+  if (lang === 'curl') {
+    const body = JSON.stringify(
+      { model: ctx.modelName, prompt, seconds: 5, size: '768P' },
+      null,
+      2
+    )
+    return [
+      `# 1. Create the task`,
+      `curl ${url} \\`,
+      `  -H "Authorization: Bearer $${ctx.apiKeyEnv}" \\`,
+      `  -H "Content-Type: application/json" \\`,
+      `  -d '${body.replace(/\n/g, '\n     ')}'`,
+      '',
+      `# 2. Poll until status is completed, then read .url`,
+      `curl ${ctx.baseUrl}/v1/videos/<VIDEO_ID> \\`,
+      `  -H "Authorization: Bearer $${ctx.apiKeyEnv}"`,
+    ].join('\n')
+  }
+  if (lang === 'python') {
+    return [
+      'import time',
+      '',
+      'from openai import OpenAI',
+      '',
+      `client = OpenAI(base_url="${ctx.baseUrl}/v1", api_key="<YOUR_API_KEY>")`,
+      '',
+      'job = client.videos.create(',
+      `    model="${ctx.modelName}",`,
+      `    prompt="${prompt}",`,
+      '    seconds=5,',
+      `    size="768P",`,
+      ')',
+      '',
+      'while job.status not in ("completed", "failed"):',
+      '    time.sleep(5)',
+      '    job = client.videos.retrieve(job.id)',
+      '',
+      'print(job.url)',
+    ].join('\n')
+  }
+  if (lang === 'typescript') {
+    return [
+      `import OpenAI from 'openai'`,
+      '',
+      `const client = new OpenAI({`,
+      `  baseURL: '${ctx.baseUrl}/v1',`,
+      `  apiKey: process.env.${ctx.apiKeyEnv},`,
+      `})`,
+      '',
+      `let job = await client.videos.create({`,
+      `  model: '${ctx.modelName}',`,
+      `  prompt: '${prompt}',`,
+      `  seconds: 5,`,
+      `  size: '768P',`,
+      `})`,
+      '',
+      `while (job.status !== 'completed' && job.status !== 'failed') {`,
+      `  await new Promise((resolve) => setTimeout(resolve, 5000))`,
+      `  job = await client.videos.retrieve(job.id)`,
+      `}`,
+      '',
+      `console.log(job.url)`,
+    ].join('\n')
+  }
+  return [
+    `const created = await fetch('${url}', {`,
+    `  method: 'POST',`,
+    `  headers: {`,
+    `    Authorization: \`Bearer \${process.env.${ctx.apiKeyEnv}}\`,`,
+    `    'Content-Type': 'application/json',`,
+    `  },`,
+    `  body: JSON.stringify({`,
+    `    model: '${ctx.modelName}',`,
+    `    prompt: '${prompt}',`,
+    `    seconds: 5,`,
+    `    size: '768P',`,
+    `  }),`,
+    `})`,
+    `const job = await created.json()`,
+    '',
+    `let detail = job`,
+    `while (detail.status !== 'completed' && detail.status !== 'failed') {`,
+    `  await new Promise((resolve) => setTimeout(resolve, 5000))`,
+    `  detail = await fetch(\`${ctx.baseUrl}/v1/videos/\${job.id}\`, {`,
+    `    headers: { Authorization: \`Bearer \${process.env.${ctx.apiKeyEnv}}\` },`,
+    `  }).then((res) => res.json())`,
+    `}`,
+    '',
+    `console.log(detail.url)`,
+  ].join('\n')
+}
+
 function buildSample(
   lang: Lang,
   endpointType: string,
@@ -433,6 +530,7 @@ function buildSample(
   if (endpointType === 'embeddings' || endpointType === 'jina-rerank')
     return buildEmbeddingSample(lang, ctx)
   if (endpointType === 'image-generation') return buildImageSample(lang, ctx)
+  if (endpointType === 'openai-video') return buildVideoSample(lang, ctx)
   return buildChatSample(lang, ctx)
 }
 
@@ -724,6 +822,91 @@ function RateLimitsSection(props: { model: PricingModel }) {
 // Authentication preview
 // ---------------------------------------------------------------------------
 
+// Video models bill on dimensions the plugin declares, so the parameter table
+// comes from the model's own request contract rather than the generic
+// chat/fps template that does not apply to them.
+function UsageParametersSection(props: { model: PricingModel }) {
+  const { t } = useTranslation()
+  const doc = useMemo(
+    () => videoUsageDoc(props.model.model_name || ''),
+    [props.model.model_name]
+  )
+  if (!doc) return null
+
+  return (
+    <section>
+      <SectionTitle icon={Sigma}>{t('Request parameters')}</SectionTitle>
+      <StaticDataTable
+        className={tableStyles.sectionContainer}
+        headerRowClassName={tableStyles.mutedHeaderRow}
+        data={doc.parameters}
+        getRowKey={(param) => param.name}
+        getRowClassName={() => 'hover:bg-muted/20'}
+        columns={[
+          {
+            id: 'parameter',
+            header: t('Parameter'),
+            className: 'h-9 w-52',
+            cellClassName: tableStyles.topCell,
+            cell: (p) => (
+              <div className='flex items-center gap-1.5'>
+                <code className='font-mono text-sm font-medium'>{p.name}</code>
+                {p.required && (
+                  <Badge
+                    variant='outline'
+                    className='h-6 border-rose-500/40 px-2 text-sm text-rose-600 dark:text-rose-400'
+                  >
+                    {t('required')}
+                  </Badge>
+                )}
+              </div>
+            ),
+          },
+          {
+            id: 'type',
+            header: t('Type'),
+            className: 'h-9 w-24',
+            cellClassName: tableStyles.topCell,
+            cell: (p) => (
+              <Badge
+                variant='secondary'
+                className='h-7 rounded-full px-2.5 font-mono text-sm font-normal'
+              >
+                {p.type}
+              </Badge>
+            ),
+          },
+          {
+            id: 'range',
+            header: t('Default / range'),
+            className: 'h-9 w-40',
+            cellClassName: tableStyles.topCell,
+            cell: (p) => (
+              <ParamRangeCell
+                param={{ ...p, descriptionKey: p.description }}
+              />
+            ),
+          },
+          {
+            id: 'description',
+            header: t('Description'),
+            className: 'h-9',
+            cellClassName: tableStyles.topMutedCell,
+            cell: (p) => t(p.description),
+          },
+        ]}
+      />
+      <div className='bg-muted/20 mt-3 space-y-1.5 rounded-lg border px-3 py-2.5'>
+        {doc.notes.map((note) => (
+          <p key={note} className='text-muted-foreground text-xs'>
+            • {t(note)}
+          </p>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function AuthSection() {
   const { t } = useTranslation()
   return (
@@ -765,6 +948,7 @@ export function ModelDetailsApi(props: {
   return (
     <div className='space-y-6'>
       <CodeSamplesSection model={props.model} endpointMap={props.endpointMap} />
+      <UsageParametersSection model={props.model} />
       <AuthSection />
       <SupportedParametersSection model={props.model} />
       <RateLimitsSection model={props.model} />
