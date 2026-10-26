@@ -239,6 +239,15 @@ export interface LogOtherData {
     cache?: number
     cache_write?: number
   }
+  // Resolution tier that priced this image request, written when the model has
+  // an image resolution pricing table.
+  image_resolution?: {
+    tier?: string
+    size?: string
+    width?: number
+    height?: number
+    price?: number
+  }
   stream_status?: {
     status?: string
     end_reason?: string

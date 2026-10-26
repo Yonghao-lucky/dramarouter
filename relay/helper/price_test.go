@@ -272,3 +272,69 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 	require.Equal(t, common.QuotaClampOverflow, clamp.Kind)
 	require.Nil(t, info.Billing)
 }
+
+// 分辨率档位价必须覆盖该模型的按次价，并且只按 n 与分组倍率放大；
+// dall-e 的尺寸倍率 (ImagePriceRatio) 不能再叠加一次。
+func TestModelPriceHelperAppliesImageResolutionTier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	savedModelPrices := ratio_setting.ModelPrice2JSONString()
+	savedResolution := ratio_setting.ImageResolutionPricing2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedModelPrices))
+		require.NoError(t, ratio_setting.UpdateImageResolutionPricingByJSONString(savedResolution))
+	})
+
+	modelPrices, err := common.Marshal(map[string]float64{"resolution-priced-image": 1})
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(modelPrices)))
+	require.NoError(t, ratio_setting.UpdateImageResolutionPricingByJSONString(`{
+		"enabled": true,
+		"models": {
+			"resolution-priced-image": {
+				"tiers": [
+					{"name": "1K", "max_pixels": 2000000, "price": 0.01},
+					{"name": "4K", "max_pixels": 0, "price": 0.04}
+				],
+				"default_price": 0.01
+			}
+		}
+	}`))
+
+	cases := []struct {
+		name      string
+		size      string
+		wantTier  string
+		wantQuota int
+	}{
+		// 0.01 USD * 500000 = 5000, times n=2 = 10000.
+		{name: "1K tier wins over the flat price", size: "1024x1024", wantTier: "1K", wantQuota: 10000},
+		{name: "4K tier wins over the flat price", size: "3840x2160", wantTier: "4K", wantQuota: 40000},
+		{name: "missing size falls back to the default price", size: "", wantTier: "default", wantQuota: 10000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Set("group", "default")
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "resolution-priced-image",
+				UserGroup:       "default",
+				UsingGroup:      "default",
+			}
+			// ImagePriceRatio models the dall-e size multiplier, which must not be
+			// applied on top of an already-final per-image tier price.
+			meta := &types.TokenCountMeta{
+				ImageSize:       tc.size,
+				ImagePriceRatio: 3,
+				BillingRatios:   map[string]float64{"n": 2},
+			}
+
+			priceData, err := ModelPriceHelper(ctx, info, 0, meta)
+			require.NoError(t, err)
+			require.True(t, priceData.UsePrice)
+			require.Equal(t, tc.wantQuota, priceData.QuotaToPreConsume)
+			require.NotNil(t, priceData.ImageResolution)
+			require.Equal(t, tc.wantTier, priceData.ImageResolution.TierName)
+		})
+	}
+}

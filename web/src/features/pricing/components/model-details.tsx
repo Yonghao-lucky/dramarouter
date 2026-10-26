@@ -79,6 +79,7 @@ import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
+import { ModelImageResolutionSection } from './model-image-resolution-pricing'
 import { ModelPeakPricingSection } from './model-peak-pricing'
 
 // ----------------------------------------------------------------------------
@@ -1193,6 +1194,9 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               showRechargePrice={showRechargePrice}
             />
             <ModelPeakPricingSection view={props.model.peak_pricing} />
+            <ModelImageResolutionSection
+              view={props.model.image_resolution_pricing}
+            />
           </section>
 
           <ModelBackendDetailsSection model={props.model} />

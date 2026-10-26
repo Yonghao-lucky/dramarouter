@@ -505,14 +505,17 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, token.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, token.CrossGroupRetry)
+	autoGroupsSnapshotSet := false
 	if token.AutoGroups != "" {
 		autoGroups, err := token.GetAutoGroups()
 		if err != nil {
 			common.SysError(fmt.Sprintf("failed to parse auto groups for token %d: %v", token.Id, err))
 			autoGroups = []string{}
 			common.SetContextKey(c, constant.ContextKeyTokenAutoGroups, autoGroups)
+			autoGroupsSnapshotSet = true
 		} else if len(autoGroups) > 0 {
 			common.SetContextKey(c, constant.ContextKeyTokenAutoGroups, autoGroups)
+			autoGroupsSnapshotSet = true
 		}
 	}
 	if token.VendorAutoGroups != "" {
@@ -521,6 +524,12 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 			common.SysError(fmt.Sprintf("failed to parse vendor auto groups for token %d: %v", token.Id, err))
 		} else if len(vendorOrders) > 0 {
 			common.SetContextKey(c, constant.ContextKeyTokenVendorAutoGroups, vendorOrders)
+			// 只按厂商配置了分组顺序、没有兜底 Auto 列表的聚合 Key 必须显式写入空快照。
+			// 缺少这个空快照时会被当作「继承全局 Auto」，于是 /v1/models 会列出
+			// Key 从未选择的分组的模型，路由也会回落到那些分组。
+			if !autoGroupsSnapshotSet {
+				common.SetContextKey(c, constant.ContextKeyTokenAutoGroups, []string{})
+			}
 		}
 	}
 	if len(parts) > 1 {

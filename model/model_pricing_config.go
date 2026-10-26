@@ -381,5 +381,6 @@ func mutateModelPricingOptions(mutate func(*gorm.DB, map[string]map[string]any) 
 	}
 	RefreshPricing()
 	ratio_setting.InvalidateExposedDataCache()
+	publishOptionChange(modelPricingOptionKeys)
 	return nil
 }

@@ -433,6 +433,25 @@ function BillingBreakdown(props: {
     })
   }
 
+  const resolution = other.image_resolution
+  if (resolution) {
+    const tierLabel = `${t('Resolution')} ${resolution.tier ?? '-'}`
+    let sizeLabel = ''
+    if (resolution.size) {
+      sizeLabel = ` · ${resolution.size}`
+    } else if (resolution.width && resolution.height) {
+      sizeLabel = ` · ${resolution.width}x${resolution.height}`
+    }
+    const priceLabel =
+      typeof resolution.price === 'number' && Number.isFinite(resolution.price)
+        ? ` · ${fmtPrice(resolution.price)}`
+        : ''
+    rows.push({
+      label: t('Image Resolution Pricing'),
+      value: `${tierLabel}${sizeLabel}${priceLabel}`,
+    })
+  }
+
   rows.push({
     label: t('Total Cost'),
     value: formatLogQuota(log.quota),

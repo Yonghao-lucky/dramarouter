@@ -44,6 +44,33 @@ const STATUS_RELATED_KEYS = new Set([
   'oidc.display_name',
 ])
 
+// Configuration keys that feed group lists, model pricing or vendor routes.
+// Those caches live under their own query keys, so saving alone would leave
+// the API keys drawer and the model square showing the previous state.
+const GROUP_AND_PRICING_KEYS = new Set([
+  'GroupRatio',
+  'GroupGroupRatio',
+  'UserUsableGroups',
+  'TopupGroupRatio',
+  'AutoGroups',
+  'MaxTokenAutoGroups',
+  'DefaultUseAutoGroup',
+  'group_ratio_setting.group_special_usable_group',
+  'ModelRatio',
+  'ModelPrice',
+  'CompletionRatio',
+  'CacheRatio',
+  'CreateCacheRatio',
+  'ImageRatio',
+  'AudioRatio',
+  'AudioCompletionRatio',
+  'PeakPricing',
+  'ImageResolutionPricing',
+  'ExposeRatioEnabled',
+  'billing_setting.billing_mode',
+  'billing_setting.billing_expr',
+])
+
 export function useUpdateOption() {
   const queryClient = useQueryClient()
 
@@ -53,6 +80,19 @@ export function useUpdateOption() {
       if (data.success) {
         // Always refresh system-options
         queryClient.invalidateQueries({ queryKey: ['system-options'] })
+
+        if (GROUP_AND_PRICING_KEYS.has(variables.key)) {
+          for (const queryKey of [
+            'pricing',
+            'user-groups',
+            'user-vendor-groups',
+            'token-auto-groups',
+            'models',
+            'model-pricing-config',
+          ]) {
+            queryClient.invalidateQueries({ queryKey: [queryKey] })
+          }
+        }
 
         // If updating frontend-display-related config, also refresh status
         if (STATUS_RELATED_KEYS.has(variables.key)) {
