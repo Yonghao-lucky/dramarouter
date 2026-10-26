@@ -299,17 +299,32 @@ function h3MediaList(source, key) {
   });
 }
 
+// The upstream accepts first_frame and last_frame only as an exact pair and
+// only at 768P, so a lone image is sent as a reference image, which every
+// resolution accepts and still guides the generation.
 function h3FrameImages(req) {
   const metadata = req.metadata || {};
   const images = h3MediaList(req, "images");
   if (images.length > H3_MAX_FRAME_IMAGES) throw new Error(H3_MODEL + " accepts at most " + H3_MAX_FRAME_IMAGES + " frame images");
-  const frames = [];
-  if (metadata.first_frame_image) frames.push(h3MediaItem("image_url", metadata.first_frame_image, "first_frame"));
-  if (metadata.last_frame_image) frames.push(h3MediaItem("image_url", metadata.last_frame_image, "last_frame"));
-  if (frames.length) return frames;
-  return images.map(function (url, index) {
-    return h3MediaItem("image_url", url, index === 0 ? "first_frame" : "last_frame");
+  const first = metadata.first_frame_image;
+  const last = metadata.last_frame_image;
+  if (first && last) {
+    return [h3MediaItem("image_url", first, "first_frame"), h3MediaItem("image_url", last, "last_frame")];
+  }
+  if (first || last) return [h3MediaItem("image_url", first || last, "reference_image")];
+  if (images.length === 0) return [];
+  if (images.length === 1) return [h3MediaItem("image_url", images[0], "reference_image")];
+  return [h3MediaItem("image_url", images[0], "first_frame"), h3MediaItem("image_url", images[1], "last_frame")];
+}
+
+// Frame-to-frame interpolation exists only in the 768P tier.
+function h3ValidateFrameResolution(content, resolution) {
+  const usesFrame = content.some(function (item) {
+    return item && (item.role === "first_frame" || item.role === "last_frame");
   });
+  if (usesFrame && resolution !== "768P") {
+    throw new Error(H3_MODEL + " first_frame/last_frame are supported only at 768P; use reference images at " + resolution);
+  }
 }
 
 function validateH3Content(items) {
@@ -587,6 +602,7 @@ export function buildSubmitRequest(ctx) {
     const resolution = h3Resolution(req);
     const ratio = h3Ratio(req, content);
     h3ValidateRatioForResolution(resolution, ratio);
+    h3ValidateFrameResolution(content, resolution);
     const h3Body = Object.assign(
       {
         model: model,
