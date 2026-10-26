@@ -47,12 +47,18 @@ export function ModelImageResolutionBadge(props: {
 }) {
   const { t } = useTranslation()
   const view = props.view
-  if (!view || view.tiers.length === 0) return null
+  if (!view) return null
 
-  const cheapest = view.tiers.reduce(
-    (lowest, tier) => (tier.price < lowest ? tier.price : lowest),
-    view.tiers[0].price
-  )
+  // 只配了 default_price、没有档位表的模型同样按分辨率计价，不能因此不显示。
+  if (view.tiers.length === 0 && !view.default_price) return null
+
+  const cheapest =
+    view.tiers.length === 0
+      ? (view.default_price ?? 0)
+      : view.tiers.reduce(
+          (lowest, tier) => (tier.price < lowest ? tier.price : lowest),
+          view.tiers[0].price
+        )
 
   return (
     <span
@@ -76,7 +82,8 @@ export function ModelImageResolutionSection(props: {
 }) {
   const { t } = useTranslation()
   const view = props.view
-  if (!view || view.tiers.length === 0) return null
+  if (!view) return null
+  if (view.tiers.length === 0 && !view.default_price) return null
 
   return (
     <section>

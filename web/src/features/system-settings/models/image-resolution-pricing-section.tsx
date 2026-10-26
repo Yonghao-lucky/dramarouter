@@ -42,9 +42,19 @@ type ImageResolutionModelPricing = {
   default_price: number
 }
 
+/**
+ * 设置页的行模型。模型名单独放在 name 里，行本身用 rowKey 标识：
+ * 若拿模型名当 React key，输入第一个字符 key 就变了，整行会重新挂载、
+ * 输入框失焦，模型名永远填不完，最终只能保存出一张空表。
+ */
+type ImageResolutionModelEntry = ImageResolutionModelPricing & {
+  rowKey: string
+  name: string
+}
+
 type ImageResolutionPricingSetting = {
   enabled: boolean
-  models: Record<string, ImageResolutionModelPricing>
+  models: ImageResolutionModelEntry[]
 }
 
 // 常见的 1K / 2K / 4K 分界，按像素面积而非固定尺寸，便于上游新增等比例尺寸。
@@ -60,6 +70,7 @@ function numberOrZero(value: string): number {
 }
 
 let tierRowSeq = 0
+let modelRowSeq = 0
 
 /** 档位行需要稳定的 key：排序与删除都会改变下标，用下标做 key 会错位。 */
 function withRowKeys(tiers: ImageResolutionTier[]): ImageResolutionTier[] {
@@ -67,6 +78,16 @@ function withRowKeys(tiers: ImageResolutionTier[]): ImageResolutionTier[] {
     tierRowSeq += 1
     return { ...tier, rowKey: tier.rowKey ?? `tier-${tierRowSeq}` }
   })
+}
+
+function newModelRow(): ImageResolutionModelEntry {
+  modelRowSeq += 1
+  return {
+    rowKey: `model-${modelRowSeq}`,
+    name: '',
+    tiers: withRowKeys(DEFAULT_TIERS.map((tier) => ({ ...tier }))),
+    default_price: DEFAULT_TIERS[0].price,
+  }
 }
 
 /** 按像素面积把一组尺寸归类，仅用于设置页的预览提示。 */
@@ -94,19 +115,23 @@ export function ImageResolutionPricingSection(
   const initial = useMemo((): ImageResolutionPricingSetting => {
     const fallback: ImageResolutionPricingSetting = {
       enabled: false,
-      models: {},
+      models: [],
     }
     if (!props.defaultValue) return fallback
     try {
-      const parsed = JSON.parse(
-        props.defaultValue
-      ) as Partial<ImageResolutionPricingSetting>
-      const models: Record<string, ImageResolutionModelPricing> = {}
+      const parsed = JSON.parse(props.defaultValue) as {
+        enabled?: boolean
+        models?: Record<string, ImageResolutionModelPricing>
+      }
+      const models: ImageResolutionModelEntry[] = []
       for (const [name, pricing] of Object.entries(parsed.models ?? {})) {
-        models[name] = {
+        modelRowSeq += 1
+        models.push({
+          rowKey: `model-${modelRowSeq}`,
+          name,
           tiers: withRowKeys(pricing.tiers ?? []),
           default_price: pricing.default_price ?? 0,
-        }
+        })
       }
       return {
         enabled: parsed.enabled ?? false,
@@ -118,52 +143,47 @@ export function ImageResolutionPricingSection(
   }, [props.defaultValue])
   const [setting, setSetting] = useState<ImageResolutionPricingSetting>(initial)
 
-  const modelNames = Object.keys(setting.models)
-
   const patchModel = (
-    modelName: string,
+    rowKey: string,
     patch: Partial<ImageResolutionModelPricing>
   ) => {
     setSetting((prev) => ({
       ...prev,
-      models: {
-        ...prev.models,
-        [modelName]: { ...prev.models[modelName], ...patch },
-      },
+      models: prev.models.map((model) =>
+        model.rowKey === rowKey ? { ...model, ...patch } : model
+      ),
     }))
   }
 
-  const renameModel = (from: string, to: string) => {
-    setSetting((prev) => {
-      const models: Record<string, ImageResolutionModelPricing> = {}
-      for (const [name, pricing] of Object.entries(prev.models)) {
-        models[name === from ? to : name] = pricing
-      }
-      return { ...prev, models }
-    })
+  const renameModel = (rowKey: string, name: string) => {
+    setSetting((prev) => ({
+      ...prev,
+      models: prev.models.map((model) =>
+        model.rowKey === rowKey ? { ...model, name } : model
+      ),
+    }))
   }
 
-  const removeModel = (modelName: string) => {
-    setSetting((prev) => {
-      const models = { ...prev.models }
-      delete models[modelName]
-      return { ...prev, models }
-    })
+  const removeModel = (rowKey: string) => {
+    setSetting((prev) => ({
+      ...prev,
+      models: prev.models.filter((model) => model.rowKey !== rowKey),
+    }))
   }
 
   const save = async () => {
     // 空模型名会直接被后端拒绝，这里先剔除，避免保存失败。
     const models: Record<string, ImageResolutionModelPricing> = {}
-    for (const [name, pricing] of Object.entries(setting.models)) {
-      const trimmed = name.trim()
+    for (const model of setting.models) {
+      const trimmed = model.name.trim()
       if (!trimmed) continue
       models[trimmed] = {
-        tiers: pricing.tiers.map((tier) => ({
+        tiers: model.tiers.map((tier) => ({
           name: tier.name.trim(),
           max_pixels: tier.max_pixels,
           price: tier.price,
         })),
-        default_price: pricing.default_price,
+        default_price: model.default_price,
       }
     }
     await updateOption.mutateAsync({
@@ -212,15 +232,7 @@ export function ImageResolutionPricingSection(
             onClick={() =>
               setSetting((prev) => ({
                 ...prev,
-                models: {
-                  ...prev.models,
-                  '': {
-                    tiers: withRowKeys(
-                      DEFAULT_TIERS.map((tier) => ({ ...tier }))
-                    ),
-                    default_price: DEFAULT_TIERS[0].price,
-                  },
-                },
+                models: [...prev.models, newModelRow()],
               }))
             }
           >
@@ -229,7 +241,7 @@ export function ImageResolutionPricingSection(
           </Button>
         </div>
 
-        {modelNames.length === 0 && (
+        {setting.models.length === 0 && (
           <p className='text-muted-foreground rounded-lg border border-dashed p-4 text-xs'>
             {t(
               'No resolution pricing configured. Image models keep their flat per-call price.'
@@ -237,19 +249,20 @@ export function ImageResolutionPricingSection(
           </p>
         )}
 
-        {modelNames.map((modelKey) => {
-          const pricing = setting.models[modelKey]
+        {setting.models.map((model) => {
+          const modelKey = model.rowKey
+          const pricing = model
           return (
-            <div key={modelKey || 'new'} className='rounded-xl border p-4'>
+            <div key={model.rowKey} className='rounded-xl border p-4'>
               <div className='flex flex-wrap items-end gap-3'>
                 <div className='flex min-w-48 flex-1 flex-col gap-1'>
                   <Label className='text-xs'>
                     {t('Model name or pattern')}
                   </Label>
                   <Input
-                    value={modelKey}
+                    value={model.name}
                     onChange={(event) =>
-                      renameModel(modelKey, event.target.value)
+                      renameModel(model.rowKey, event.target.value)
                     }
                     placeholder='gpt-image-2.5'
                     className='font-mono text-xs'

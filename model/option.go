@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"strconv"
@@ -217,6 +218,108 @@ func loadOptionsFromDatabase() {
 	}
 }
 
+// optionSyncChannel carries the option keys that another instance has just
+// committed, so every node can republish them immediately.
+const optionSyncChannel = "new-api:option:sync"
+
+// optionSyncOrigin identifies this process so a publisher can ignore the echo
+// of its own message (Redis delivers a channel message to the publishing
+// process as well, and it has already applied the change locally).
+var optionSyncOrigin = common.GetUUID()
+
+type optionSyncMessage struct {
+	Origin string   `json:"origin"`
+	Keys   []string `json:"keys"`
+}
+
+// optionAffectsPricing lists the keys that feed the cached pricing snapshot
+// (model square cards, vendor routes, per-model peak/resolution tiers). Those
+// snapshots are rebuilt lazily with a one-minute TTL, so a save that only
+// updated OptionMap would stay invisible on the model square until the TTL
+// expired.
+func optionAffectsPricing(key string) bool {
+	if IsModelPricingOption(key) {
+		return true
+	}
+	switch key {
+	case "PeakPricing", "ImageResolutionPricing":
+		return true
+	}
+	return false
+}
+
+// refreshPricingAfterOptionChange rebuilds every pricing snapshot a saved
+// option can invalidate. Call it after the OptionMap write has been released,
+// never while holding OptionMapRWMutex.
+func refreshPricingAfterOptionChange(keys []string) {
+	for _, key := range keys {
+		if !optionAffectsPricing(key) {
+			continue
+		}
+		RefreshPricing()
+		ratio_setting.InvalidateExposedDataCache()
+		return
+	}
+}
+
+// publishOptionChange tells the other instances to reload these keys. Without
+// it a save only refreshes the node that served the request, and any follow-up
+// read landing on a peer keeps serving the previous value until the next
+// SyncOptions poll (SYNC_FREQUENCY, 60s by default) — the "saved but not
+// visible until I refresh for a minute or two" symptom.
+func publishOptionChange(keys []string) {
+	if !common.RedisEnabled || common.RDB == nil || len(keys) == 0 {
+		return
+	}
+	payload, err := common.Marshal(optionSyncMessage{Origin: optionSyncOrigin, Keys: keys})
+	if err != nil {
+		common.SysError("failed to encode option sync payload: " + err.Error())
+		return
+	}
+	if err := common.RDB.Publish(context.Background(), optionSyncChannel, payload).Err(); err != nil {
+		common.SysError("failed to publish option change: " + err.Error())
+	}
+}
+
+// StartOptionSync subscribes to cross-instance option updates.
+func StartOptionSync() {
+	if !common.RedisEnabled || common.RDB == nil {
+		return
+	}
+	pubsub := common.RDB.Subscribe(context.Background(), optionSyncChannel)
+	common.SysLog("option sync subscriber started")
+	for message := range pubsub.Channel() {
+		var payload optionSyncMessage
+		if err := common.UnmarshalJsonStr(message.Payload, &payload); err != nil {
+			common.SysError("failed to decode option sync payload: " + err.Error())
+			continue
+		}
+		if payload.Origin == optionSyncOrigin {
+			continue
+		}
+		reloadOptionsByKey(payload.Keys)
+	}
+}
+
+// reloadOptionsByKey re-reads the committed values and applies them through the
+// same path as a local save, so peer nodes behave identically to the writer.
+func reloadOptionsByKey(keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	var rows []Option
+	if err := DB.Where(commonKeyCol+" IN ?", keys).Find(&rows).Error; err != nil {
+		common.SysError("failed to reload synced options: " + err.Error())
+		return
+	}
+	for _, row := range rows {
+		if err := updateOptionMap(row.Key, row.Value); err != nil {
+			common.SysError("failed to apply synced option: " + err.Error())
+		}
+	}
+	refreshPricingAfterOptionChange(keys)
+}
+
 func SyncOptions(frequency int) {
 	for {
 		time.Sleep(time.Duration(frequency) * time.Second)
@@ -294,7 +397,12 @@ func UpdateOption(key string, value string) error {
 	// otherwise it will execute Update (with all fields).
 	DB.Save(&option)
 	// Update OptionMap
-	return updateOptionMap(key, value)
+	if err := updateOptionMap(key, value); err != nil {
+		return err
+	}
+	refreshPricingAfterOptionChange([]string{key})
+	publishOptionChange([]string{key})
+	return nil
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
@@ -353,6 +461,12 @@ func UpdateOptionsBulk(values map[string]string) error {
 			return err
 		}
 	}
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	refreshPricingAfterOptionChange(keys)
+	publishOptionChange(keys)
 	return nil
 }
 

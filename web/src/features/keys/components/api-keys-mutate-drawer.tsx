@@ -482,6 +482,7 @@ export function ApiKeysMutateDrawer({
                             value={field.value}
                             onValueChange={(group) => field.onChange(group)}
                             placeholder={t('Select a group')}
+                            vendors={vendorCatalogs}
                           />
                         )}
                       </div>
