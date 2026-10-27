@@ -158,7 +158,6 @@ type RelayInfo struct {
 	ResellerOwnerID     int
 	ResellerRetailRatio float64
 	ResellerCostRatio   float64
-	ResellerPath        string
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// supported single-request bound (or NaN fallback) while computing this request's charge.

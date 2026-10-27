@@ -326,7 +326,7 @@ func migrateDB() error {
 		&CostAccountingSnapshot{}, &CostAccountingAdjustment{},
 		&ResellerProfile{}, &ResellerGroupCost{}, &ResellerDefaultPrice{},
 		&CustomerGroupPrice{}, &ResellerCustomerBinding{}, &ResellerCustomerEvent{},
-		&ResellerCustomerAllocation{}, &ResellerMarginsDaily{}, &ResellerAllocationReservation{}, &ResellerMarginCreditCursor{},
+		&ResellerTransfer{},
 		&BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{},
 		&Channel{},
 		&Token{},
@@ -389,6 +389,9 @@ func migrateDB() error {
 	if err := migrateRelayMediaPolicyAllowedMIMETypes(); err != nil {
 		return err
 	}
+	if err := migrateResellerOwnerKeys(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
@@ -414,7 +417,7 @@ func migrateDBFast() error {
 	if err := ensureStorageObjectUploadMetadataColumns(DB); err != nil {
 		return err
 	}
-	if err := DB.AutoMigrate(&BillingAccount{}, &BillingAccountEvent{}, &BillingOperation{}, &BillingEntry{}, &BillingHour{}, &BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{}, &CostAccountingSnapshot{}, &CostAccountingAdjustment{}, &BillingCorrection{}, &BillingCorrectionRow{}, &BillingCorrectionClaim{}, &ResellerProfile{}, &ResellerGroupCost{}, &ResellerDefaultPrice{}, &CustomerGroupPrice{}, &ResellerCustomerBinding{}, &ResellerCustomerEvent{}, &ResellerCustomerAllocation{}, &ResellerMarginsDaily{}, &ResellerAllocationReservation{}, &ResellerMarginCreditCursor{}); err != nil {
+	if err := DB.AutoMigrate(&BillingAccount{}, &BillingAccountEvent{}, &BillingOperation{}, &BillingEntry{}, &BillingHour{}, &BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{}, &CostAccountingSnapshot{}, &CostAccountingAdjustment{}, &BillingCorrection{}, &BillingCorrectionRow{}, &BillingCorrectionClaim{}, &ResellerProfile{}, &ResellerGroupCost{}, &ResellerDefaultPrice{}, &CustomerGroupPrice{}, &ResellerCustomerBinding{}, &ResellerCustomerEvent{}, &ResellerTransfer{}); err != nil {
 		return err
 	}
 	if err := ensureChannelCostDiscountColumn(DB); err != nil {

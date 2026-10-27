@@ -203,7 +203,6 @@ type TaskBillingContext struct {
 	ResellerOwnerID     int     `json:"reseller_owner_id,omitempty"`
 	ResellerRetailRatio float64 `json:"reseller_retail_ratio,omitempty"`
 	ResellerCostRatio   float64 `json:"reseller_cost_ratio,omitempty"`
-	ResellerPath        string  `json:"reseller_path,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）

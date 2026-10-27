@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,11 +68,150 @@ func TestResellerMarginQuotaArithmetic(t *testing.T) {
 	assert.Equal(t, int64(-200), ResellerMarginQuota(-1000, 1.25, 1.0))
 }
 
-func TestResellerCustomerAllocationAvailability(t *testing.T) {
-	allocation := ResellerCustomerAllocation{AllocatedQuota: 1000, ReservedQuota: 300, UsedQuota: 500}
-	assert.Equal(t, int64(200), allocation.AvailableQuota())
-	allocation = ResellerCustomerAllocation{AllocatedQuota: 100, ReservedQuota: 300, UsedQuota: 500}
-	assert.Zero(t, allocation.AvailableQuota(), "available quota must never be negative")
+// TestResellerTransferMarginsAndReclaim pins the single-wallet contract: a fund
+// credits the customer retail quota and charges the reseller the wholesale
+// amount, and a reclaim returns the average cost actually paid.
+func TestResellerTransferMarginsAndReclaim(t *testing.T) {
+	truncateTables(t)
+
+	const (
+		resellerID = 9401
+		customerID = 9402
+	)
+	require.NoError(t, DB.Create(&User{Id: resellerID, Username: "transfer_reseller", Group: "default", AffCode: "trs1", Quota: 100000}).Error)
+	require.NoError(t, DB.Create(&User{Id: customerID, Username: "transfer_customer", Group: "vip", AffCode: "trs2"}).Error)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: resellerID, Name: "r", Status: ResellerStatusEnabled}).Error)
+	require.NoError(t, SetResellerCustomerOwner(customerID, resellerID, resellerID, "seed"))
+	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.8", Enabled: true}).Error)
+	require.NoError(t, DB.Create(&ResellerDefaultPrice{ResellerId: resellerID, GroupName: "vip", Ratio: "1.0"}).Error)
+
+	// 10000 retail at cost 0.8 / retail 1.0 costs the reseller 8000.
+	transfer, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "vip", 10000, "evt-fund-1", "seed")
+	require.NoError(t, err)
+	assert.Equal(t, int64(8000), transfer.CostQuota)
+	assert.Equal(t, "1", transfer.RetailRatio)
+	assert.Equal(t, "0.8", transfer.CostRatio)
+
+	resellerQuota, err := GetUserQuota(resellerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, 100000-8000, resellerQuota)
+	customerQuota, err := GetUserQuota(customerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, 10000, customerQuota)
+
+	// The same event key is idempotent: no second movement.
+	again, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "vip", 10000, "evt-fund-1", "seed")
+	require.NoError(t, err)
+	assert.Equal(t, transfer.Id, again.Id)
+	resellerQuota, err = GetUserQuota(resellerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, 100000-8000, resellerQuota)
+
+	// Reclaim 4000 returns the average paid cost, not the money originally paid.
+	reclaim, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, "vip", 4000, "evt-reclaim-1", "unused")
+	require.NoError(t, err)
+	assert.Equal(t, int64(3200), reclaim.CostQuota)
+	resellerQuota, err = GetUserQuota(resellerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, 100000-8000+3200, resellerQuota)
+	customerQuota, err = GetUserQuota(customerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, 6000, customerQuota)
+
+	// A reclaim cannot exceed the outstanding retail position.
+	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, "vip", 7000, "evt-reclaim-2", "too much")
+	assert.ErrorIs(t, err, ErrResellerTransferInvalid)
+
+	reclaimable, err := ResellerReclaimableQuota(resellerID, customerID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(6000), reclaimable)
+}
+
+// TestResellerTransferGuards pins the three refusals that protect the platform:
+// an unauthorized group, a reseller wallet that cannot cover the wholesale, and
+// a customer that is not owned by the caller.
+func TestResellerTransferGuards(t *testing.T) {
+	truncateTables(t)
+
+	const (
+		resellerID = 9411
+		customerID = 9412
+		otherID    = 9413
+	)
+	require.NoError(t, DB.Create(&User{Id: resellerID, Username: "guard_reseller", Group: "default", AffCode: "trg1", Quota: 100}).Error)
+	require.NoError(t, DB.Create(&User{Id: customerID, Username: "guard_customer", Group: "vip", AffCode: "trg2"}).Error)
+	require.NoError(t, DB.Create(&User{Id: otherID, Username: "guard_other", Group: "default", AffCode: "trg3"}).Error)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: resellerID, Name: "r", Status: ResellerStatusEnabled}).Error)
+	require.NoError(t, SetResellerCustomerOwner(customerID, resellerID, resellerID, "seed"))
+	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.8", Enabled: true}).Error)
+
+	_, err := TransferResellerQuota(resellerID, otherID, resellerID, ResellerTransferFund, "vip", 1000, "evt-guard-own", "")
+	assert.ErrorIs(t, err, ErrResellerCustomerNotFound, "an unowned customer must never be funded")
+
+	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "default", 1000, "evt-guard-group", "")
+	assert.ErrorIs(t, err, ErrResellerGroupNotAllowed, "a group without a cost row cannot be sold")
+
+	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "vip", 1000, "evt-guard-wallet", "")
+	assert.ErrorIs(t, err, ErrResellerWalletShort, "the reseller must prepay the wholesale amount")
+}
+
+// TestResellerPriceFloor pins "客户价格不得低于成本": a reseller-scoped price below
+// its own wholesale ratio is refused, while the administrator is not bound.
+func TestResellerPriceFloor(t *testing.T) {
+	truncateTables(t)
+
+	const (
+		resellerID = 9421
+		customerID = 9422
+	)
+	require.NoError(t, DB.Create(&User{Id: resellerID, Username: "floor_reseller", Group: "default", AffCode: "trf1"}).Error)
+	require.NoError(t, DB.Create(&User{Id: customerID, Username: "floor_customer", Group: "vip", AffCode: "trf2"}).Error)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: resellerID, Name: "r", Status: ResellerStatusEnabled}).Error)
+	require.NoError(t, SetResellerCustomerOwner(customerID, resellerID, resellerID, "seed"))
+	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.8", Enabled: true}).Error)
+
+	err := SetCustomerGroupPrice(customerID, "vip", "0.5", "reseller", resellerID, true)
+	assert.ErrorIs(t, err, ErrResellerPriceBelowCost)
+
+	require.NoError(t, SetCustomerGroupPrice(customerID, "vip", "1.2", "reseller", resellerID, true))
+	prices, err := ListCustomerGroupPrices(customerID)
+	require.NoError(t, err)
+	require.Len(t, prices, 1)
+	assert.Equal(t, "1.2", prices[0].Ratio)
+
+	// The administrator may price below cost for a platform promotion.
+	require.NoError(t, SetCustomerGroupPrice(customerID, "vip", "0.5", "admin", 1, false))
+}
+
+// TestResellerCustomerLogsHideChannel pins that a reseller never learns the
+// channel identity of its customers' usage.
+func TestResellerCustomerLogsHideChannel(t *testing.T) {
+	truncateTables(t)
+
+	const (
+		resellerID = 9431
+		customerID = 9432
+	)
+	require.NoError(t, DB.Create(&User{Id: resellerID, Username: "log_reseller", Group: "default", AffCode: "trl1"}).Error)
+	require.NoError(t, DB.Create(&User{Id: customerID, Username: "log_customer", Group: "default", AffCode: "trl2"}).Error)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: resellerID, Name: "r", Status: ResellerStatusEnabled}).Error)
+	require.NoError(t, SetResellerCustomerOwner(customerID, resellerID, resellerID, "seed"))
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId: customerID, Type: LogTypeConsume, Content: "charge", ChannelId: 77, ChannelName: "secret-channel",
+		ModelName: "gpt-image-2.5", CreatedAt: common.GetTimestamp(),
+	}).Error)
+
+	logs, total, err := ResellerCustomerLogs(resellerID, 0, LogTypeUnknown, 0, 0, "", 0, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, logs, 1)
+	assert.Zero(t, logs[0].ChannelId, "channel id must never reach a reseller")
+	assert.Empty(t, logs[0].ChannelName, "channel name must never reach a reseller")
+
+	// A customer outside the book is refused outright.
+	otherLogs, _, err := ResellerCustomerLogs(resellerID, 999999, LogTypeUnknown, 0, 0, "", 0, 20)
+	assert.ErrorIs(t, err, ErrResellerCustomerNotFound)
+	assert.Empty(t, otherLogs)
 }
 
 func TestResellerOwnershipHistoryIsAppendOnly(t *testing.T) {

@@ -42,12 +42,12 @@ import {
   listResellerProfiles,
   setCustomerGroupPrice,
   setCustomerOwner,
-  setResellerAllocation,
   setResellerCost,
   setResellerDefaultPrice,
+  transferResellerQuota,
+  type ResellerProfile,
   upsertResellerProfile,
 } from './api'
-import type { ResellerProfile } from './api'
 
 const QUOTA_PER_UNIT = 500000
 
@@ -124,20 +124,23 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
   })
 
   const saveAllocation = useMutation({
-    mutationFn: (payload: { userId: number; current: number }) =>
-      setResellerAllocation(
-        payload.userId,
-        Number(allocationDrafts[payload.userId] ?? payload.current)
-      ),
+    mutationFn: (payload: { userId: number; direction: 'fund' | 'reclaim' }) =>
+      transferResellerQuota({
+        reseller_id: profile.user_id,
+        customer_user_id: payload.userId,
+        direction: payload.direction,
+        retail_quota: Number(allocationDrafts[payload.userId] ?? 0),
+      }),
     onSuccess: () => {
-      toast.success(t('Allocation updated'))
+      toast.success(t('Quota transferred'))
       refresh()
     },
     onError: (error: Error) => toast.error(error.message),
   })
 
   const releaseOwner = useMutation({
-    mutationFn: (userId: number) => setCustomerOwner(userId, 0, 'admin release'),
+    mutationFn: (userId: number) =>
+      setCustomerOwner(userId, 0, 'admin release'),
     onSuccess: () => {
       toast.success(t('Ownership released'))
       refresh()
@@ -244,7 +247,7 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
                 <TableHead>{t('Customer')}</TableHead>
                 <TableHead>{t('Group')}</TableHead>
                 <TableHead>{t('Wallet')}</TableHead>
-                <TableHead>{t('Allocated')}</TableHead>
+                <TableHead>{t('Funded')}</TableHead>
                 <TableHead>{t('Used')}</TableHead>
                 <TableHead>{t('Allocation')}</TableHead>
                 <TableHead>{t('Retail ratio')}</TableHead>
@@ -265,7 +268,7 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
                     {formatQuota(row.wallet_quota)}
                   </TableCell>
                   <TableCell className='tabular-nums'>
-                    {formatQuota(row.allocated_quota)}
+                    {formatQuota(row.funded_quota)}
                   </TableCell>
                   <TableCell className='tabular-nums'>
                     {formatQuota(row.used_quota)}
@@ -274,7 +277,7 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
                     <div className='flex items-center gap-2'>
                       <Input
                         className='w-28'
-                        placeholder={String(row.allocated_quota)}
+                        placeholder={t('Quota')}
                         value={allocationDrafts[row.user_id] ?? ''}
                         onChange={(event) =>
                           setAllocationDrafts((prev) => ({
@@ -290,11 +293,24 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
                         onClick={() =>
                           saveAllocation.mutate({
                             userId: row.user_id,
-                            current: row.allocated_quota,
+                            direction: 'fund',
                           })
                         }
                       >
-                        {t('Save')}
+                        {t('Fund')}
+                      </Button>
+                      <Button
+                        size='sm'
+                        variant='ghost'
+                        disabled={!allocationDrafts[row.user_id]}
+                        onClick={() =>
+                          saveAllocation.mutate({
+                            userId: row.user_id,
+                            direction: 'reclaim',
+                          })
+                        }
+                      >
+                        {t('Reclaim')}
                       </Button>
                     </div>
                   </TableCell>
@@ -397,7 +413,9 @@ export function ResellerAdmin() {
 
   return (
     <SectionPageLayout>
-      <SectionPageLayout.Title>{t('Reseller management')}</SectionPageLayout.Title>
+      <SectionPageLayout.Title>
+        {t('Reseller management')}
+      </SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='flex flex-col gap-4'>
           <div className='flex flex-wrap items-end gap-2'>
@@ -435,11 +453,15 @@ export function ResellerAdmin() {
                 <TableBody>
                   {(profiles.data ?? []).map((profile) => (
                     <TableRow key={profile.id}>
-                      <TableCell>{profile.name || profile.code || '-'}</TableCell>
+                      <TableCell>
+                        {profile.name || profile.code || '-'}
+                      </TableCell>
                       <TableCell>#{profile.user_id}</TableCell>
                       <TableCell>
                         <Badge
-                          variant={profile.status === 2 ? 'default' : 'secondary'}
+                          variant={
+                            profile.status === 2 ? 'default' : 'secondary'
+                          }
                         >
                           {profile.status === 2 ? t('Enabled') : t('Disabled')}
                         </Badge>

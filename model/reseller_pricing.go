@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,7 +14,7 @@ import (
 )
 
 const (
-	resellerPricingCacheNamespace = "new-api:reseller_pricing:v1"
+	resellerPricingCacheNamespace = "new-api:reseller_pricing:v2"
 	resellerPricingCacheCapacity  = 20000
 )
 
@@ -24,7 +25,8 @@ var (
 
 // ResellerPricing is the pricing layer owned by the reseller subsystem. It is
 // additive: when Override is false the caller keeps the existing group-ratio
-// result untouched.
+// result untouched. CostRatio is the reseller's wholesale price for the group;
+// it is not charged per request any more, it prices wallet transfers.
 type ResellerPricing struct {
 	OwnerID   int
 	Retail    float64
@@ -82,7 +84,10 @@ func InvalidateResellerDefaultPricingCache() error {
 
 func parsePositiveRatio(raw string) (float64, bool) {
 	ratio, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil || ratio <= 0 {
+	if err != nil || ratio <= 0 || ratio != ratio {
+		return 0, false
+	}
+	if ratio > 1e9 {
 		return 0, false
 	}
 	return ratio, true
@@ -130,7 +135,7 @@ func loadResellerPricing(userID int, usingGroup string) (ResellerPricing, error)
 		if ratio, ok := parsePositiveRatio(customerPrice.Ratio); ok {
 			result.Retail, result.Override, result.Source = ratio, true, "customer"
 		}
-	} else if err != gorm.ErrRecordNotFound {
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return ResellerPricing{}, err
 	}
 
@@ -140,7 +145,7 @@ func loadResellerPricing(userID int, usingGroup string) (ResellerPricing, error)
 			if ratio, ok := parsePositiveRatio(cost.CostRatio); ok {
 				result.CostRatio = ratio
 			}
-		} else if err != gorm.ErrRecordNotFound {
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return ResellerPricing{}, err
 		}
 
@@ -151,34 +156,23 @@ func loadResellerPricing(userID int, usingGroup string) (ResellerPricing, error)
 				if ratio, ok := parsePositiveRatio(defaultPrice.Ratio); ok {
 					result.Retail, result.Override, result.Source = ratio, true, "reseller_default"
 				}
-			} else if err != gorm.ErrRecordNotFound {
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return ResellerPricing{}, err
 			}
 		}
 	}
 
-	// A customer override also carries the reseller cost so the frozen margin is
-	// computable in one pass.
 	return result, nil
 }
 
-// ResellerMarginQuota derives the reseller share for one charge. Retail is what
-// the customer paid, costRatio the reseller's wholesale ratio, retailRatio the
-// effective retail ratio. Rounding goes through the shared quota helper.
-func ResellerWholesaleQuota(retailQuota int64, retailRatio, costRatio float64) int64 {
-	if retailQuota == 0 || retailRatio <= 0 || costRatio <= 0 {
-		return 0
-	}
-	return int64(common.QuotaRound(float64(retailQuota) * costRatio / retailRatio))
-}
-
-// ResellerMarginQuota is exactly retail minus wholesale, so the frozen margin
-// plus the wholesale charge always re-add to the customer's retail charge.
+// ResellerMarginQuota is the reseller share of one charge: retail minus the
+// wholesale the reseller is charged for the same consumption. It is reported
+// evidence only; the money changes hands when the reseller transfers quota.
 func ResellerMarginQuota(retailQuota int64, retailRatio, costRatio float64) int64 {
 	if retailQuota == 0 || retailRatio <= 0 || costRatio <= 0 {
 		return 0
 	}
-	return retailQuota - ResellerWholesaleQuota(retailQuota, retailRatio, costRatio)
+	return retailQuota - int64(common.QuotaRound(float64(retailQuota)*costRatio/retailRatio))
 }
 
 // EffectiveRatio returns the ratio this customer must be charged for the group.
@@ -188,11 +182,4 @@ func (p ResellerPricing) EffectiveRatio(fallback float64) float64 {
 		return p.Retail
 	}
 	return fallback
-}
-
-// PoolEnabled reports whether the reseller-funded path can pay for this
-// customer. A reseller that never configured a wholesale cost cannot fund a
-// pool: the customer falls back to their own wallet and no margin is derived.
-func (p ResellerPricing) PoolEnabled() bool {
-	return p.OwnerID > 0 && p.Override && p.Retail > 0 && p.CostRatio > 0
 }

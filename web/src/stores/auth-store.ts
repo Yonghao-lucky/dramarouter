@@ -52,6 +52,8 @@ export interface AuthUser {
   setting?: Record<string, unknown> | string
   stripe_customer?: string
   sidebar_modules?: string
+  /** True only for an enabled reseller account; gates the console entry. */
+  reseller_enabled?: boolean
   permissions?: UserPermissions
 }
 

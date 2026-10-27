@@ -30,7 +30,9 @@ export function RouteErrorCard() {
   return (
     <Card className='mx-auto my-12 max-w-lg'>
       <CardContent className='flex flex-col items-center gap-4 py-10 text-center'>
-        <div className='text-base font-medium'>{t('This page failed to load')}</div>
+        <div className='text-base font-medium'>
+          {t('This page failed to load')}
+        </div>
         <p className='text-muted-foreground text-sm'>
           {t(
             'The page may have been updated after a deployment. Please refresh to load the latest version.'

@@ -16,9 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ROLE } from '@/lib/roles'
-
 import { api } from '@/lib/api'
+import { ROLE } from '@/lib/roles'
 
 interface Response<T> {
   success: boolean
@@ -57,14 +56,15 @@ export interface ResellerBook {
 export interface AdminResellerCustomer {
   user_id: number
   username: string
+  display_name: string
   group: string
   status: number
   wallet_quota: number
-  allocated_quota: number
-  reserved_quota: number
+  funded_quota: number
+  funded_cost_quota: number
   used_quota: number
-  revenue_quota: number
-  margin_quota: number
+  request_count: number
+  last_activity_at: number
 }
 
 function unwrap<T>(response: Response<T>): T {
@@ -101,9 +101,8 @@ export async function setResellerCost(payload: {
   ratio: string
   enabled?: boolean
 }) {
-  return (
-    await api.put<Response<null>>('/api/user/reseller/cost', payload)
-  ).data
+  return (await api.put<Response<null>>('/api/user/reseller/cost', payload))
+    .data
 }
 
 export async function setResellerDefaultPrice(payload: {
@@ -111,9 +110,8 @@ export async function setResellerDefaultPrice(payload: {
   group: string
   ratio: string
 }) {
-  return (
-    await api.put<Response<null>>('/api/user/reseller/price', payload)
-  ).data
+  return (await api.put<Response<null>>('/api/user/reseller/price', payload))
+    .data
 }
 
 export async function getResellerBook(resellerId: number) {
@@ -163,22 +161,21 @@ export async function setCustomerOwner(
   ).data
 }
 
-export async function setResellerAllocation(
-  customerUserId: number,
-  allocatedQuota: number
-) {
+export async function transferResellerQuota(payload: {
+  reseller_id: number
+  customer_user_id: number
+  direction: 'fund' | 'reclaim'
+  group?: string
+  retail_quota: number
+  remark?: string
+}) {
   return (
-    await api.put<Response<null>>('/api/user/reseller/allocation', {
-      customer_user_id: customerUserId,
-      allocated_quota: allocatedQuota,
-    })
+    await api.post<Response<null>>('/api/user/reseller/transfer', payload)
   ).data
 }
 
 export async function getGroups() {
-  return unwrap(
-    (await api.get<Response<string[]>>('/api/group/')).data
-  )
+  return unwrap((await api.get<Response<string[]>>('/api/group/')).data)
 }
 
 export { ROLE }

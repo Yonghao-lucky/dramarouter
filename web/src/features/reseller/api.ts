@@ -20,15 +20,25 @@ import { api } from '@/lib/api'
 
 import type {
   ResellerCustomer,
+  ResellerCustomerDetail,
+  ResellerCustomerGroup,
+  ResellerLogRow,
   ResellerMarginDay,
   ResellerPriceBook,
   ResellerSummary,
+  ResellerTransfer,
   ResellerUsageRow,
 } from './types'
 
 interface Response<T> {
   success: boolean
   data: T
+  message?: string
+}
+
+interface PageResponse<T> {
+  success: boolean
+  data: T[] | { items: T[]; total: number; page: number; page_size: number }
   message?: string
 }
 
@@ -39,41 +49,114 @@ function unwrap<T>(response: Response<T>): T {
   return response.data
 }
 
+function unwrapPage<T>(response: PageResponse<T>): {
+  items: T[]
+  total: number
+} {
+  if (!response.success) {
+    throw new Error(response.message || 'Something went wrong!')
+  }
+  if (Array.isArray(response.data)) {
+    return { items: response.data, total: response.data.length }
+  }
+  return { items: response.data.items ?? [], total: response.data.total ?? 0 }
+}
+
 export async function getResellerSummary() {
   return unwrap(
     (await api.get<Response<ResellerSummary>>('/api/reseller/summary')).data
   )
 }
 
-export async function getResellerCustomers(afterId = 0, limit = 50) {
+export async function getResellerCustomers(
+  keyword = '',
+  afterId = 0,
+  limit = 50
+) {
   return unwrap(
     (
       await api.get<Response<ResellerCustomer[]>>('/api/reseller/customers', {
-        params: { after_id: afterId, limit },
+        params: { keyword, after_id: afterId, limit },
       })
     ).data
   )
 }
 
-export async function createResellerCustomer(username: string, password: string) {
+export async function getResellerCustomerDetail(customerId: number) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerCustomerDetail>>(
+        `/api/reseller/customers/${customerId}`
+      )
+    ).data
+  )
+}
+
+export async function createResellerCustomer(payload: {
+  username: string
+  password: string
+  display_name?: string
+  email?: string
+  group?: string
+}) {
+  return unwrap(
+    (
+      await api.post<Response<{ user_id: number; username: string }>>(
+        '/api/reseller/customers',
+        payload
+      )
+    ).data
+  )
+}
+
+export async function setResellerCustomerStatus(
+  customerId: number,
+  status: number
+) {
   return (
-    await api.post<Response<{ user_id: number; username: string }>>(
-      '/api/reseller/customers',
-      { username, password }
+    await api.put<Response<null>>(
+      `/api/reseller/customers/${customerId}/status`,
+      {
+        status,
+      }
     )
   ).data
 }
 
-export async function setResellerAllocation(
+export async function resetResellerCustomerPassword(
   customerId: number,
-  allocatedQuota: number
+  password: string
 ) {
   return (
     await api.put<Response<null>>(
-      `/api/reseller/customers/${customerId}/allocation`,
-      { allocated_quota: allocatedQuota }
+      `/api/reseller/customers/${customerId}/password`,
+      { password }
     )
   ).data
+}
+
+export async function setResellerCustomerGroup(
+  customerId: number,
+  group: string
+) {
+  return (
+    await api.put<Response<null>>(
+      `/api/reseller/customers/${customerId}/group`,
+      {
+        group,
+      }
+    )
+  ).data
+}
+
+export async function getResellerCustomerGroups(customerId: number) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerCustomerGroup[]>>(
+        `/api/reseller/customers/${customerId}/groups`
+      )
+    ).data
+  )
 }
 
 export async function setResellerCustomerPrice(
@@ -84,9 +167,46 @@ export async function setResellerCustomerPrice(
   return (
     await api.put<Response<null>>(
       `/api/reseller/customers/${customerId}/price`,
-      { group, ratio }
+      {
+        group,
+        ratio,
+      }
     )
   ).data
+}
+
+export async function transferResellerQuota(
+  customerId: number,
+  payload: {
+    direction: 'fund' | 'reclaim'
+    group?: string
+    retail_quota: number
+    remark?: string
+    event_key?: string
+  }
+) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerTransfer>>(
+        `/api/reseller/customers/${customerId}/transfer`,
+        payload
+      )
+    ).data
+  )
+}
+
+export async function getResellerTransfers(params: {
+  customer_id?: number
+  before_id?: number
+  limit?: number
+}) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerTransfer[]>>('/api/reseller/transfers', {
+        params,
+      })
+    ).data
+  )
 }
 
 export async function getResellerUsage(params: {
@@ -117,8 +237,58 @@ export async function getResellerMargins(start?: number, end?: number) {
 
 export async function getResellerPriceBook() {
   return unwrap(
+    (await api.get<Response<ResellerPriceBook>>('/api/reseller/price-book'))
+      .data
+  )
+}
+
+export async function getResellerLogs(params: {
+  customer_id?: number
+  type?: number
+  model_name?: string
+  start_timestamp?: number
+  end_timestamp?: number
+  p?: number
+  page_size?: number
+}) {
+  return unwrapPage(
     (
-      await api.get<Response<ResellerPriceBook>>('/api/reseller/price-book')
+      await api.get<PageResponse<ResellerLogRow>>('/api/reseller/logs', {
+        params,
+      })
+    ).data
+  )
+}
+
+export interface ResellerTaskRow {
+  id: number
+  created_at: number
+  task_id: string
+  platform: string
+  user_id: number
+  group: string
+  quota: number
+  action: string
+  status: string
+  fail_reason: string
+  model_name: string
+  progress: string
+}
+
+export async function getResellerTasks(params: {
+  customer_id?: number
+  model_name?: string
+  status?: string
+  start_timestamp?: number
+  end_timestamp?: number
+  p?: number
+  page_size?: number
+}) {
+  return unwrapPage<ResellerTaskRow>(
+    (
+      await api.get<PageResponse<ResellerTaskRow>>('/api/reseller/tasks', {
+        params,
+      })
     ).data
   )
 }
