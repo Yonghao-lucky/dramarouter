@@ -8,10 +8,31 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+// platformDefaultGroup is the group a reseller-created customer starts in. A
+// customer is an ordinary platform account, so it starts exactly where a
+// platform-created user starts: the default group.
+const platformDefaultGroup = "default"
+
+// isPlatformGroup reports whether a group name is one the platform actually
+// serves. Customer placement is about being a normal account, not about the
+// reseller's price book.
+func isPlatformGroup(group string) bool {
+	if group == "" {
+		return false
+	}
+	_, ok := setting.GetUserUsableGroupsCopy()[group]
+	if ok {
+		return true
+	}
+	return ratio_setting.ContainsGroupRatio(group)
+}
 
 // requireReseller resolves the calling user's enabled reseller profile. The
 // profile carries the reseller's own user id; that id is the owner key for every
@@ -316,9 +337,11 @@ func ResellerCustomerDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": detail})
 }
 
-// ResellerCreateCustomer creates a normal platform user in the reseller's
-// default group and binds it to the caller in one transaction. The new user
-// keeps a normal role; reseller pricing comes from the pricing layer.
+// ResellerCreateCustomer creates a normal platform user and binds it to the
+// caller in one transaction. The customer is an ordinary account: it lands in
+// the platform default group and may call any group its key selects, exactly
+// like a user the platform created. Reseller pricing comes from the pricing
+// layer and never from the account's own group.
 func ResellerCreateCustomer(c *gin.Context) {
 	profile, ok := requireReseller(c)
 	if !ok {
@@ -341,39 +364,12 @@ func ResellerCreateCustomer(c *gin.Context) {
 		return
 	}
 	group := strings.TrimSpace(req.Group)
-	costs, _, err := model.ListResellerPricingBook(profile.UserId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	// A reseller may only place a customer in a group it is authorized to
-	// resell; otherwise the customer would consume at an unpriced group and the
-	// reseller could never fund it. With no group requested, prefer the
-	// reseller's first authorized group over a hard-coded "default", which the
-	// reseller usually has no wholesale price for.
 	if group == "" {
-		for _, cost := range costs {
-			if cost.Enabled {
-				group = cost.GroupName
-				break
-			}
-		}
-		if group == "" {
-			writeResellerError(c, model.ErrResellerGroupNotAllowed)
-			return
-		}
-	} else {
-		allowed := false
-		for _, cost := range costs {
-			if cost.Enabled && cost.GroupName == group {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			writeResellerError(c, model.ErrResellerGroupNotAllowed)
-			return
-		}
+		group = platformDefaultGroup
+	}
+	if !isPlatformGroup(group) {
+		common.ApiErrorMsg(c, "unknown group")
+		return
 	}
 	if req.DisplayName == "" {
 		req.DisplayName = req.Username
@@ -433,6 +429,11 @@ func ResellerSetCustomerStatus(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// The auth middleware reads Status from the user cache, so a status change
+	// must republish it or the customer keeps the old state until the TTL.
+	if err := model.PublishUserAuthCache(customerId); err != nil {
+		common.SysError("failed to refresh user cache after reseller status change: " + err.Error())
+	}
 	model.RecordLog(profile.UserId, model.LogTypeSystem, "reseller set customer status")
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
@@ -466,8 +467,9 @@ func ResellerResetCustomerPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// ResellerSetCustomerGroup moves one owned customer into another group the
-// reseller is authorized to resell.
+// ResellerSetCustomerGroup moves one owned customer into another platform
+// group. A customer is an ordinary account, so every group the platform serves
+// is a valid destination; the reseller's price book only decides its margin.
 func ResellerSetCustomerGroup(c *gin.Context) {
 	profile, ok := requireReseller(c)
 	if !ok {
@@ -485,25 +487,18 @@ func ResellerSetCustomerGroup(c *gin.Context) {
 		return
 	}
 	group := strings.TrimSpace(req.Group)
-	costs, _, err := model.ListResellerPricingBook(profile.UserId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	allowed := false
-	for _, cost := range costs {
-		if cost.Enabled && cost.GroupName == group {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		writeResellerError(c, model.ErrResellerGroupNotAllowed)
+	if !isPlatformGroup(group) {
+		common.ApiErrorMsg(c, "unknown group")
 		return
 	}
 	if err := model.DB.Model(&model.User{}).Where("id = ?", customerId).Update("group", group).Error; err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	// Relay reads the group from the user cache, so republish it before the
+	// reseller sees the customer consume under the old group.
+	if err := model.RefreshUserGroupCache(customerId); err != nil {
+		common.SysError("failed to refresh user group cache after reseller group change: " + err.Error())
 	}
 	_ = model.InvalidateResellerPricingCache(customerId)
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -551,6 +546,22 @@ func ResellerTransfers(c *gin.Context) {
 	before, _ := strconv.ParseInt(c.DefaultQuery("before_id", "0"), 10, 64)
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	rows, err := model.ListResellerTransfers(profile.UserId, customerId, before, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
+}
+
+// ResellerPlatformGroups lists every group the platform serves, annotated with
+// the caller's cost and standing price where it has one. The console uses this
+// for customer placement and for the price book header.
+func ResellerPlatformGroups(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	rows, err := model.ResellerPlatformGroups(profile.UserId, 0)
 	if err != nil {
 		common.ApiError(c, err)
 		return

@@ -159,6 +159,16 @@ export async function getResellerCustomerGroups(customerId: number) {
   )
 }
 
+export async function getResellerPlatformGroups() {
+  return unwrap(
+    (
+      await api.get<Response<ResellerCustomerGroup[]>>(
+        '/api/reseller/groups'
+      )
+    ).data
+  )
+}
+
 export async function setResellerCustomerPrice(
   customerId: number,
   group: string,

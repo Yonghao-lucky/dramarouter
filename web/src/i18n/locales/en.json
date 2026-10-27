@@ -8811,6 +8811,12 @@
     "· replace placeholders with the ids from the create response.": "· replace placeholders with the ids from the create response.",
     "、": ", ",
     "，": ", ",
-    "，and ": ", and "
+    "，and ": ", and ",
+    "No cost set": "No cost set",
+    "Saving": "Saving",
+    "Creating": "Creating",
+    "Reset password for {{name}}": "Reset password for {{name}}",
+    "A customer may call any group with their key. You earn the spread only on groups where you have a wholesale cost; the others still work for the customer at the platform price.": "A customer may call any group with their key. You earn the spread only on groups where you have a wholesale cost; the others still work for the customer at the platform price.",
+    "The customer is an ordinary account: they start in the default group and may call any group with their key.": "The customer is an ordinary account: they start in the default group and may call any group with their key."
   }
 }

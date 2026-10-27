@@ -79,6 +79,7 @@ export interface ResellerCustomerGroup {
   cost_ratio: string
   ratio: string
   source: string
+  sellable: boolean
 }
 
 export interface ResellerUsageRow {

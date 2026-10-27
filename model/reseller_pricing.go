@@ -140,14 +140,11 @@ func loadResellerPricing(userID int, usingGroup string) (ResellerPricing, error)
 	}
 
 	if ownerID > 0 {
-		var cost ResellerGroupCost
-		if err := DB.Where("reseller_id = ? AND group_name = ? AND enabled = ?", ownerID, usingGroup, true).First(&cost).Error; err == nil {
-			if ratio, ok := parsePositiveRatio(cost.CostRatio); ok {
-				result.CostRatio = ratio
-			}
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		cost, err := resellerCostRatio(DB, ownerID, usingGroup)
+		if err != nil {
 			return ResellerPricing{}, err
 		}
+		result.CostRatio = cost
 
 		if !result.Override {
 			var defaultPrice ResellerDefaultPrice

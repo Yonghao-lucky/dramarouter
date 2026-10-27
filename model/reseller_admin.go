@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -83,22 +84,26 @@ func SetResellerGroupCost(resellerId int, group, ratio string, enabled bool, act
 	return InvalidateResellerDefaultPricingCache()
 }
 
-// resellerCostRatio returns the enabled wholesale ratio for one group, or 0
-// when the group is not authorized for this reseller.
+// resellerCostRatio returns the wholesale ratio for one group. An enabled
+// ResellerGroupCost row wins; otherwise the group falls back to the platform
+// group ratio, which is the platform's own cost for that traffic. A group the
+// platform does not serve at all returns 0 and is not sellable.
 func resellerCostRatio(tx *gorm.DB, resellerId int, group string) (float64, error) {
 	var cost ResellerGroupCost
 	err := tx.Where("reseller_id = ? AND group_name = ? AND enabled = ?", resellerId, group, true).First(&cost).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, nil
-	}
-	if err != nil {
+	if err == nil {
+		if ratio, ok := parsePositiveRatio(cost.CostRatio); ok {
+			return ratio, nil
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, err
 	}
-	ratio, ok := parsePositiveRatio(cost.CostRatio)
-	if !ok {
-		return 0, nil
+	if ratio_setting.ContainsGroupRatio(group) {
+		if ratio := ratio_setting.GetGroupRatio(group); ratio > 0 {
+			return ratio, nil
+		}
 	}
-	return ratio, nil
+	return 0, nil
 }
 
 // SetResellerDefaultPrice is the reseller's standing retail price. It may never

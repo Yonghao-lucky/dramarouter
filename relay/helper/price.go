@@ -78,7 +78,11 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 }
 
 // applyResellerPricing overrides the resolved group ratio when the customer has
-// a configured reseller price for this billing group.
+// a configured reseller price for this billing group, and always attaches the
+// reseller evidence the margin rollup needs. A customer whose group has no
+// reseller retail price is still charged the platform ratio, but the spread
+// between that ratio and the reseller's wholesale cost is the reseller's margin
+// and must be recorded when a wholesale cost exists.
 func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *hosttypes.GroupRatioInfo) {
 	relayInfo.ResellerOwnerID = 0
 	relayInfo.ResellerCostRatio = 0
@@ -91,14 +95,18 @@ func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *host
 		logger.LogError(nil, "failed to resolve reseller pricing: "+err.Error())
 		return
 	}
-	if !pricing.Override {
+	if pricing.OwnerID <= 0 || pricing.CostRatio <= 0 {
 		return
 	}
-	groupRatioInfo.GroupSpecialRatio = pricing.Retail
-	groupRatioInfo.GroupRatio = pricing.Retail
-	groupRatioInfo.HasSpecialRatio = true
+	if pricing.Override {
+		groupRatioInfo.GroupSpecialRatio = pricing.Retail
+		groupRatioInfo.GroupRatio = pricing.Retail
+		groupRatioInfo.HasSpecialRatio = true
+		relayInfo.ResellerRetailRatio = pricing.Retail
+	} else {
+		relayInfo.ResellerRetailRatio = groupRatioInfo.GroupRatio
+	}
 	relayInfo.ResellerOwnerID = pricing.OwnerID
-	relayInfo.ResellerRetailRatio = pricing.Retail
 	relayInfo.ResellerCostRatio = pricing.CostRatio
 }
 

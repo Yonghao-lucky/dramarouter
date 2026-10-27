@@ -33,6 +33,14 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -268,52 +276,92 @@ function CustomerDetailDialog(props: {
             </div>
 
             <div>
-              <div className='mb-2 text-sm font-medium'>
+              <div className='mb-1 text-sm font-medium'>
                 {t('Group pricing')}
               </div>
+              <p className='text-muted-foreground mb-2 text-xs'>
+                {t(
+                  'A customer may call any group with their key. You earn the spread only on groups where you have a wholesale cost; the others still work for the customer at the platform price.'
+                )}
+              </p>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('Group')}</TableHead>
                     <TableHead>{t('My cost')}</TableHead>
                     <TableHead>{t('Customer price')}</TableHead>
+                    <TableHead>{t('Margin')}</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(groups.data ?? []).map((group) => (
-                    <TableRow key={group.group}>
-                      <TableCell>{group.group}</TableCell>
-                      <TableCell className='tabular-nums'>
-                        {group.cost_ratio}
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className='w-24'
-                          placeholder={group.ratio}
-                          value={priceDrafts[group.group] ?? ''}
-                          onChange={(event) =>
-                            setPriceDrafts((prev) => ({
-                              ...prev,
-                              [group.group]: event.target.value,
-                            }))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          size='sm'
-                          variant='outline'
-                          disabled={!priceDrafts[group.group]}
-                          onClick={() => savePrice.mutate(group.group)}
-                        >
-                          {t('Save')}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {(groups.data ?? []).map((group) => {
+                    const retail = Number(priceDrafts[group.group] || group.ratio)
+                    const cost = Number(group.cost_ratio)
+                    const margin =
+                      retail > 0 && cost > 0
+                        ? `${(((retail - cost) / retail) * 100).toFixed(1)}%`
+                        : '—'
+                    return (
+                      <TableRow key={group.group}>
+                        <TableCell>
+                          <div className='flex items-center gap-1.5'>
+                            <span>{group.group}</span>
+                            {group.group === data.group ? (
+                              <Badge variant='outline'>{t('Current')}</Badge>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className='tabular-nums'>
+                          {group.cost_ratio || '—'}
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className='w-24'
+                            inputMode='decimal'
+                            placeholder={group.ratio || '—'}
+                            disabled={!group.sellable}
+                            value={priceDrafts[group.group] ?? ''}
+                            onChange={(event) =>
+                              setPriceDrafts((prev) => ({
+                                ...prev,
+                                [group.group]: event.target.value,
+                              }))
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' && group.sellable) {
+                                event.preventDefault()
+                                savePrice.mutate(group.group)
+                              }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell className='text-muted-foreground tabular-nums'>
+                          {group.sellable ? margin : t('No cost set')}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            disabled={
+                              !group.sellable ||
+                              !priceDrafts[group.group] ||
+                              (savePrice.isPending &&
+                                savePrice.variables === group.group)
+                            }
+                            onClick={() => savePrice.mutate(group.group)}
+                          >
+                            {savePrice.isPending &&
+                            savePrice.variables === group.group
+                              ? t('Saving')
+                              : t('Save')}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                   {(groups.data ?? []).length === 0 ? (
-                    <EmptyRow colSpan={4} />
+                    <EmptyRow colSpan={5} />
                   ) : null}
                 </TableBody>
               </Table>
@@ -377,11 +425,22 @@ function CustomersPanel() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [group, setGroup] = useState('default')
   const [openCustomer, setOpenCustomer] = useState<number | null>(null)
+  const [passwordTarget, setPasswordTarget] = useState<ResellerCustomer | null>(
+    null
+  )
 
   const customers = useQuery({
     queryKey: ['reseller', 'customers', keyword],
     queryFn: () => getResellerCustomers(keyword),
+  })
+  // One request for every group the platform serves, shared by the create form
+  // and by every row's group selector. Fetching per row would issue one request
+  // per customer on every list render.
+  const platformGroups = useQuery({
+    queryKey: ['reseller', 'platform-groups'],
+    queryFn: getResellerPlatformGroups,
   })
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ['reseller'] })
@@ -392,6 +451,7 @@ function CustomersPanel() {
         username,
         password,
         display_name: displayName || undefined,
+        group,
       }),
     onSuccess: () => {
       toast.success(t('Customer created'))
@@ -416,6 +476,7 @@ function CustomersPanel() {
       resetResellerCustomerPassword(payload.id, payload.password),
     onSuccess: () => {
       toast.success(t('Password reset'))
+      setPasswordTarget(null)
     },
   })
 
@@ -428,6 +489,8 @@ function CustomersPanel() {
     },
   })
 
+  const groupOptions = platformGroups.data ?? []
+
   return (
     <div className='flex flex-col gap-4'>
       <Card>
@@ -438,12 +501,14 @@ function CustomersPanel() {
           <Input
             className='w-40'
             placeholder={t('Username')}
+            autoComplete='off'
             value={username}
             onChange={(event) => setUsername(event.target.value)}
           />
           <Input
             className='w-40'
             placeholder={t('Display name')}
+            autoComplete='off'
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
           />
@@ -451,17 +516,46 @@ function CustomersPanel() {
             className='w-40'
             type='password'
             placeholder={t('Password (8-20 chars)')}
+            autoComplete='new-password'
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
+          <Select
+            items={groupOptions.map((row) => ({
+              value: row.group,
+              label: row.group,
+            }))}
+            value={group}
+            onValueChange={(value) => {
+              if (value) setGroup(value)
+            }}
+          >
+            <SelectTrigger className='w-40'>
+              <SelectValue placeholder={t('Group')} />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {groupOptions.map((row) => (
+                  <SelectItem key={row.group} value={row.group}>
+                    {row.group}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <Button
             disabled={
               !username || password.length < 8 || createCustomer.isPending
             }
             onClick={() => createCustomer.mutate()}
           >
-            {t('Create')}
+            {createCustomer.isPending ? t('Creating') : t('Create')}
           </Button>
+        </CardContent>
+        <CardContent className='text-muted-foreground pt-0 text-xs'>
+          {t(
+            'The customer is an ordinary account: they start in the default group and may call any group with their key.'
+          )}
         </CardContent>
       </Card>
 
@@ -472,9 +566,16 @@ function CustomersPanel() {
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
         />
-        <Button variant='outline' onClick={() => void customers.refetch()}>
+        <Button
+          variant='outline'
+          disabled={customers.isFetching}
+          onClick={() => void customers.refetch()}
+        >
           {t('Refresh')}
         </Button>
+        {customers.isFetching ? (
+          <span className='text-muted-foreground text-xs'>{t('Loading')}</span>
+        ) : null}
       </div>
 
       <Table>
@@ -505,22 +606,31 @@ function CustomersPanel() {
                 </button>
               </TableCell>
               <TableCell>
-                <select
-                  className='border-input bg-background h-8 rounded-md border px-2 text-sm'
+                <Select
+                  items={groupOptions.map((option) => ({
+                    value: option.group,
+                    label: option.group,
+                  }))}
                   value={row.group}
-                  onChange={(event) =>
-                    moveGroup.mutate({
-                      id: row.user_id,
-                      group: event.target.value,
-                    })
-                  }
+                  onValueChange={(value) => {
+                    if (value && value !== row.group) {
+                      moveGroup.mutate({ id: row.user_id, group: value })
+                    }
+                  }}
                 >
-                  <option value={row.group}>{row.group}</option>
-                  <MoveGroupOptions
-                    customerId={row.user_id}
-                    current={row.group}
-                  />
-                </select>
+                  <SelectTrigger className='w-36'>
+                    <SelectValue placeholder={row.group} />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {groupOptions.map((option) => (
+                        <SelectItem key={option.group} value={option.group}>
+                          {option.group}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </TableCell>
               <TableCell>
                 <Badge variant={row.status === 1 ? 'default' : 'secondary'}>
@@ -548,6 +658,7 @@ function CustomersPanel() {
                   <Button
                     size='sm'
                     variant='ghost'
+                    disabled={toggleStatus.isPending}
                     onClick={() => toggleStatus.mutate(row)}
                   >
                     {row.status === 1 ? t('Disable') : t('Enable')}
@@ -555,15 +666,7 @@ function CustomersPanel() {
                   <Button
                     size='sm'
                     variant='ghost'
-                    onClick={() => {
-                      const next = window.prompt(t('New password'))
-                      if (next && next.length >= 8) {
-                        resetPassword.mutate({
-                          id: row.user_id,
-                          password: next,
-                        })
-                      }
-                    }}
+                    onClick={() => setPasswordTarget(row)}
                   >
                     {t('Reset password')}
                   </Button>
@@ -581,25 +684,120 @@ function CustomersPanel() {
         customerId={openCustomer}
         onClose={() => setOpenCustomer(null)}
       />
+
+      <PasswordResetDialog
+        customer={passwordTarget}
+        pending={resetPassword.isPending}
+        onClose={() => setPasswordTarget(null)}
+        onSubmit={(next) =>
+          passwordTarget &&
+          resetPassword.mutate({ id: passwordTarget.user_id, password: next })
+        }
+      />
     </div>
   )
 }
 
-function MoveGroupOptions(props: { customerId: number; current: string }) {
-  const groups = useQuery({
-    queryKey: ['reseller', 'customer-groups', props.customerId],
-    queryFn: () => getResellerCustomerGroups(props.customerId),
-  })
+function PasswordResetDialog(props: {
+  customer: ResellerCustomer | null
+  pending: boolean
+  onClose: () => void
+  onSubmit: (password: string) => void
+}) {
+  const { t } = useTranslation()
+  const [password, setPassword] = useState('')
+  const valid = password.length >= 8 && password.length <= 20
+
   return (
-    <>
-      {(groups.data ?? [])
-        .filter((group) => group.group !== props.current)
-        .map((group) => (
-          <option key={group.group} value={group.group}>
-            {group.group}
-          </option>
-        ))}
-    </>
+    <Dialog
+      open={props.customer != null}
+      onOpenChange={(open) => {
+        if (!open) {
+          setPassword('')
+          props.onClose()
+        }
+      }}
+    >
+      <DialogContent className='max-w-sm'>
+        <DialogHeader>
+          <DialogTitle>
+            {t('Reset password for {{name}}', {
+              name: props.customer?.username ?? '',
+            })}
+          </DialogTitle>
+        </DialogHeader>
+        <div className='flex flex-col gap-3'>
+          <Input
+            type='password'
+            autoComplete='new-password'
+            placeholder={t('Password (8-20 chars)')}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <div className='flex justify-end gap-2'>
+            <Button variant='outline' onClick={props.onClose}>
+              {t('Cancel')}
+            </Button>
+            <Button
+              disabled={!valid || props.pending}
+              onClick={() => props.onSubmit(password)}
+            >
+              {t('Save')}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function CustomerFilter(props: {
+  value: string
+  onChange: (value: string) => void
+  onRefresh: () => void
+  refreshing: boolean
+}) {
+  const { t } = useTranslation()
+  const customers = useQuery({
+    queryKey: ['reseller', 'customers', ''],
+    queryFn: () => getResellerCustomers('', 0, 200),
+  })
+
+  return (
+    <div className='flex flex-wrap items-center gap-2'>
+      <Select
+        items={[
+          { value: '0', label: t('All customers') },
+          ...(customers.data ?? []).map((row) => ({
+            value: String(row.user_id),
+            label: `${row.username} · #${row.user_id}`,
+          })),
+        ]}
+        value={props.value || '0'}
+        onValueChange={(next) => props.onChange(next === '0' ? '' : (next ?? ''))}
+      >
+        <SelectTrigger className='w-56'>
+          <SelectValue placeholder={t('All customers')} />
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}>
+          <SelectGroup>
+            <SelectItem value='0'>{t('All customers')}</SelectItem>
+            {(customers.data ?? []).map((row) => (
+              <SelectItem key={row.user_id} value={String(row.user_id)}>
+                {row.username} · #{row.user_id}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <Button
+        variant='outline'
+        disabled={props.refreshing}
+        onClick={props.onRefresh}
+      >
+        {t('Refresh')}
+      </Button>
+    </div>
   )
 }
 
@@ -617,17 +815,12 @@ function TransfersPanel() {
 
   return (
     <div className='flex flex-col gap-3'>
-      <div className='flex items-center gap-2'>
-        <Input
-          className='w-48'
-          placeholder={t('Customer id (optional)')}
-          value={customerId}
-          onChange={(event) => setCustomerId(event.target.value)}
-        />
-        <Button variant='outline' onClick={() => void transfers.refetch()}>
-          {t('Refresh')}
-        </Button>
-      </div>
+      <CustomerFilter
+        value={customerId}
+        onChange={setCustomerId}
+        onRefresh={() => void transfers.refetch()}
+        refreshing={transfers.isFetching}
+      />
       <Table>
         <TableHeader>
           <TableRow>
@@ -689,17 +882,12 @@ function UsagePanel() {
 
   return (
     <div className='flex flex-col gap-3'>
-      <div className='flex items-center gap-2'>
-        <Input
-          className='w-48'
-          placeholder={t('Customer id (optional)')}
-          value={customerId}
-          onChange={(event) => setCustomerId(event.target.value)}
-        />
-        <Button variant='outline' onClick={() => void usage.refetch()}>
-          {t('Refresh')}
-        </Button>
-      </div>
+      <CustomerFilter
+        value={customerId}
+        onChange={setCustomerId}
+        onRefresh={() => void usage.refetch()}
+        refreshing={usage.isFetching}
+      />
       <Table>
         <TableHeader>
           <TableRow>
@@ -749,17 +937,12 @@ function LogsPanel() {
 
   return (
     <div className='flex flex-col gap-3'>
-      <div className='flex items-center gap-2'>
-        <Input
-          className='w-48'
-          placeholder={t('Customer id (optional)')}
-          value={customerId}
-          onChange={(event) => setCustomerId(event.target.value)}
-        />
-        <Button variant='outline' onClick={() => void logs.refetch()}>
-          {t('Refresh')}
-        </Button>
-      </div>
+      <CustomerFilter
+        value={customerId}
+        onChange={setCustomerId}
+        onRefresh={() => void logs.refetch()}
+        refreshing={logs.isFetching}
+      />
       <Table>
         <TableHeader>
           <TableRow>

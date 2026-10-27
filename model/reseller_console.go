@@ -2,9 +2,11 @@ package model
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
 	"gorm.io/gorm"
 )
 
@@ -291,43 +293,112 @@ func ListResellerMarginDays(resellerUserId int, start, end int64) ([]ResellerMar
 	return rows, err
 }
 
-// ResellerCustomerGroups returns the groups the reseller may sell, joined with
-// the customer's current effective price.
-func ResellerCustomerGroups(resellerUserId, customerUserId int) ([]map[string]any, error) {
+// ResellerPlatformGroupRow is one platform group as a reseller sees it: what
+// the group costs the reseller (when it has a wholesale row) and the price a
+// specific customer would be charged there.
+type ResellerPlatformGroupRow struct {
+	Group     string `json:"group"`
+	CostRatio string `json:"cost_ratio"`
+	Ratio     string `json:"ratio"`
+	Source    string `json:"source"`
+	// Sellable is false for a group without an enabled wholesale cost. Such a
+	// group is still usable by the customer, but the reseller earns nothing on
+	// it and cannot set a price floor there.
+	Sellable bool `json:"sellable"`
+}
+
+// platformGroupNames returns every group the platform serves, sorted. The
+// reseller's price book may cover a subset; customer placement is independent
+// of it.
+func platformGroupNames(extra ...string) []string {
+	names := make(map[string]struct{}, 32)
+	for name := range setting.GetUserUsableGroupsCopy() {
+		names[name] = struct{}{}
+	}
+	for _, name := range extra {
+		if name != "" {
+			names[name] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// ResellerPlatformGroups lists every platform group with the caller's cost and
+// standing price. customerUserId is 0 when only the price book is needed.
+func ResellerPlatformGroups(resellerUserId, customerUserId int) ([]ResellerPlatformGroupRow, error) {
+	if resellerUserId <= 0 {
+		return nil, ErrResellerTransferInvalid
+	}
 	costs := make([]ResellerGroupCost, 0)
-	if err := DB.Where("reseller_id = ? AND enabled = ?", resellerUserId, true).Order("group_name asc").Find(&costs).Error; err != nil {
+	if err := DB.Where("reseller_id = ? AND enabled = ?", resellerUserId, true).Find(&costs).Error; err != nil {
 		return nil, err
 	}
-	prices, err := ListCustomerGroupPrices(customerUserId)
-	if err != nil {
-		return nil, err
-	}
-	overrideByGroup := make(map[string]string, len(prices))
-	for _, price := range prices {
-		overrideByGroup[price.GroupName] = price.Ratio
-	}
-	result := make([]map[string]any, 0, len(costs))
+	costByGroup := make(map[string]string, len(costs))
+	extra := make([]string, 0, len(costs))
 	for _, cost := range costs {
-		row := map[string]any{"group": cost.GroupName, "cost_ratio": cost.CostRatio}
-		if ratio, ok := overrideByGroup[cost.GroupName]; ok {
-			row["ratio"] = ratio
-			row["source"] = "customer"
-		} else {
-			var defaultPrice ResellerDefaultPrice
-			err := DB.Where("reseller_id = ? AND group_name = ?", resellerUserId, cost.GroupName).First(&defaultPrice).Error
-			if err == nil {
-				row["ratio"] = defaultPrice.Ratio
-				row["source"] = "reseller_default"
-			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		costByGroup[cost.GroupName] = cost.CostRatio
+		extra = append(extra, cost.GroupName)
+	}
+	defaults := make([]ResellerDefaultPrice, 0)
+	if err := DB.Where("reseller_id = ?", resellerUserId).Find(&defaults).Error; err != nil {
+		return nil, err
+	}
+	defaultByGroup := make(map[string]string, len(defaults))
+	for _, price := range defaults {
+		defaultByGroup[price.GroupName] = price.Ratio
+	}
+	overrideByGroup := make(map[string]string)
+	if customerUserId > 0 {
+		prices, err := ListCustomerGroupPrices(customerUserId)
+		if err != nil {
+			return nil, err
+		}
+		for _, price := range prices {
+			overrideByGroup[price.GroupName] = price.Ratio
+		}
+	}
+
+	groupNames := platformGroupNames(extra...)
+	rows := make([]ResellerPlatformGroupRow, 0, len(groupNames))
+	for _, name := range groupNames {
+		row := ResellerPlatformGroupRow{Group: name, CostRatio: costByGroup[name]}
+		// A group without an explicit wholesale row still costs the reseller the
+		// platform's own group ratio, which is exactly what the billing path
+		// charges against when it computes the margin.
+		if row.CostRatio == "" {
+			if ratio, err := resellerCostRatio(DB, resellerUserId, name); err != nil {
 				return nil, err
-			} else {
-				row["ratio"] = cost.CostRatio
-				row["source"] = "cost"
+			} else if ratio > 0 {
+				row.CostRatio = strconv.FormatFloat(ratio, 'f', -1, 64)
 			}
 		}
-		result = append(result, row)
+		row.Sellable = row.CostRatio != ""
+		switch {
+		case overrideByGroup[name] != "":
+			row.Ratio, row.Source = overrideByGroup[name], "customer"
+		case defaultByGroup[name] != "":
+			row.Ratio, row.Source = defaultByGroup[name], "reseller_default"
+		case row.CostRatio != "":
+			row.Ratio, row.Source = row.CostRatio, "cost"
+		default:
+			row.Source = "platform"
+		}
+		rows = append(rows, row)
 	}
-	return result, nil
+	return rows, nil
+}
+
+// ResellerCustomerGroups returns every platform group with the customer's
+// effective price. Groups outside the reseller's price book are included with
+// an empty cost so the console can show that the customer may use them but the
+// reseller earns nothing there.
+func ResellerCustomerGroups(resellerUserId, customerUserId int) ([]ResellerPlatformGroupRow, error) {
+	return ResellerPlatformGroups(resellerUserId, customerUserId)
 }
 
 // ResellerCustomerLogs pages the usage logs of every owned customer with the

@@ -283,6 +283,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.GET("/tasks", controller.ResellerCustomerTasks)
 			resellerRoute.GET("/margins", controller.ResellerMargins)
 			resellerRoute.GET("/price-book", controller.ResellerPriceBook)
+			resellerRoute.GET("/groups", controller.ResellerPlatformGroups)
 		}
 
 		// Subscription billing (plans, purchase, admin management)

@@ -52,10 +52,51 @@ func TestResolveResellerPricingLayering(t *testing.T) {
 	assert.Equal(t, 1.5, specific.Retail)
 	assert.Equal(t, 0.8, specific.CostRatio, "cost ratio still comes from the reseller profile")
 
-	// A group without any configured layer falls through.
+	// A group without a reseller retail price still resolves the reseller's cost
+	// for it, because the customer is an ordinary account that may call that
+	// group and the spread is the reseller's margin.
 	unpriced, err := ResolveResellerPricing(customerID, "default")
 	require.NoError(t, err)
-	assert.False(t, unpriced.Override)
+	assert.False(t, unpriced.Override, "no retail price must leave the platform ratio in charge")
+	assert.Equal(t, resellerID, unpriced.OwnerID)
+	assert.Greater(t, unpriced.CostRatio, 0.0, "the platform group ratio is the fallback cost")
+}
+
+// TestResellerPlatformGroupsListsEveryPlatformGroup pins the contract that a
+// reseller customer may be placed in any group the platform serves, not only
+// the ones in the reseller's price book, and that a group outside the book
+// still reports a cost and an effective price.
+func TestResellerPlatformGroupsListsEveryPlatformGroup(t *testing.T) {
+	truncateTables(t)
+
+	const (
+		customerID = 9201
+		resellerID = 9202
+	)
+	require.NoError(t, DB.Create(&User{Id: customerID, Username: "groups_customer", Group: "default", AffCode: "rpg1"}).Error)
+	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.4", Enabled: true}).Error)
+	require.NoError(t, DB.Create(&CustomerGroupPrice{UserId: customerID, GroupName: "vip", Ratio: "0.9", Source: "reseller"}).Error)
+
+	rows, err := ResellerPlatformGroups(resellerID, customerID)
+	require.NoError(t, err)
+
+	byGroup := make(map[string]ResellerPlatformGroupRow, len(rows))
+	for _, row := range rows {
+		byGroup[row.Group] = row
+	}
+
+	vip, ok := byGroup["vip"]
+	require.True(t, ok, "the price-book group must be listed")
+	assert.True(t, vip.Sellable)
+	assert.Equal(t, "0.4", vip.CostRatio)
+	assert.Equal(t, "0.9", vip.Ratio)
+	assert.Equal(t, "customer", vip.Source)
+
+	platform, ok := byGroup["default"]
+	require.True(t, ok, "a platform group outside the price book must still be listed")
+	assert.True(t, platform.Sellable, "a platform group has a platform cost, so it is sellable")
+	assert.NotEmpty(t, platform.CostRatio)
+	assert.Equal(t, "cost", platform.Source)
 }
 
 func TestResellerMarginQuotaArithmetic(t *testing.T) {

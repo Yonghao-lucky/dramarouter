@@ -8548,7 +8548,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相關項目",
     "footer.defaultCopyright": "版權所有。",
-    "footer.new\u0061pi.projectAttributionSuffix": "版權所有，由項目貢獻者設計與開發。",
+    "footer.newapi.projectAttributionSuffix": "版權所有，由項目貢獻者設計與開發。",
     "gpt-3.5-turbo": "gpt-3.5-turbo",
     "gpt-3.5-turbo-0125": "gpt-3.5-turbo-0125",
     "gpt-4": "gpt-4",
@@ -8811,6 +8811,12 @@
     "· replace placeholders with the ids from the create response.": "· 請把佔位符替換為建立介面返回的 ID。",
     "、": "、",
     "，": "，",
-    "，and ": "，並"
+    "，and ": "，並",
+    "No cost set": "未設成本",
+    "Saving": "儲存中",
+    "Creating": "建立中",
+    "Reset password for {{name}}": "重置 {{name}} 的密碼",
+    "A customer may call any group with their key. You earn the spread only on groups where you have a wholesale cost; the others still work for the customer at the platform price.": "客戶可以用自己的金鑰呼叫任何分組。只有當你在該分組配置了批發成本時你才有差價；其餘分組客戶仍按平臺價正常使用。",
+    "The customer is an ordinary account: they start in the default group and may call any group with their key.": "客戶就是普通賬號：預設落在 default 分組，可以用自己的金鑰呼叫任何分組。"
   }
 }
