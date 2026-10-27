@@ -23,6 +23,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { buildSearchParams } from '../lib/filter'
+import { isSameSearch } from '../lib/query-params'
+import { useRefreshLogs } from '../lib/use-logs-refresh'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { DrawingLogFilters, LogCategory, TaskLogFilters } from '../types'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
@@ -70,6 +72,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const refreshLogs = useRefreshLogs()
 
   const [filters, setFilters] = useState<TaskLogsFilters>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -123,31 +126,38 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
 
   const handleApply = useCallback(() => {
     const filterParams = buildSearchParams(filters, props.logCategory)
-    navigate({
+    const nextSearch = { ...filterParams, page: 1 }
+    if (isSameSearch(nextSearch, searchParams)) {
+      void refreshLogs()
+      return
+    }
+    void navigate({
       to: '/usage-logs/$section',
       params: { section: props.logCategory },
-      search: {
-        ...filterParams,
-        page: 1,
-      },
+      search: nextSearch,
     })
-  }, [filters, navigate, props.logCategory])
+  }, [filters, navigate, props.logCategory, refreshLogs, searchParams])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
     const resetFilters: TaskLogsFilters = { startTime: start, endTime: end }
     setFilters(resetFilters)
 
-    navigate({
+    const resetSearch = {
+      page: 1,
+      startTime: start.getTime(),
+      endTime: end.getTime(),
+    }
+    if (isSameSearch(resetSearch, searchParams)) {
+      void refreshLogs()
+      return
+    }
+    void navigate({
       to: '/usage-logs/$section',
       params: { section: props.logCategory },
-      search: {
-        page: 1,
-        startTime: start.getTime(),
-        endTime: end.getTime(),
-      },
+      search: resetSearch,
     })
-  }, [navigate, props.logCategory])
+  }, [navigate, props.logCategory, refreshLogs, searchParams])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

@@ -40,6 +40,8 @@ import {
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
+import { isSameSearch } from '../lib/query-params'
+import { useRefreshLogs } from '../lib/use-logs-refresh'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
@@ -118,6 +120,7 @@ export function CommonLogsFilterBar<TData>(
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const refreshLogs = useRefreshLogs()
 
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -186,16 +189,23 @@ export function CommonLogsFilterBar<TData>(
 
   const handleApply = useCallback(() => {
     const filterParams = buildSearchParams(filters, 'common')
-    navigate({
+    const nextSearch = {
+      ...filterParams,
+      type: [logType],
+      page: 1,
+    }
+    // Same filters still means "show me the latest": skip the no-op navigation
+    // and refetch in place.
+    if (isSameSearch(nextSearch, searchParams)) {
+      void refreshLogs()
+      return
+    }
+    void navigate({
       to: '/usage-logs/$section',
       params: { section: 'common' },
-      search: {
-        ...filterParams,
-        type: [logType],
-        page: 1,
-      },
+      search: nextSearch,
     })
-  }, [filters, logType, navigate])
+  }, [filters, logType, navigate, refreshLogs, searchParams])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
@@ -204,6 +214,7 @@ export function CommonLogsFilterBar<TData>(
       type: [LOG_TYPE_ALL_VALUE],
       startTime: start.getTime(),
       endTime: end.getTime(),
+      page: 1,
     }
     setDraft({
       sourceKey: buildSearchSourceKey(resetSearch),
@@ -211,15 +222,16 @@ export function CommonLogsFilterBar<TData>(
       logType: LOG_TYPE_ALL_VALUE,
     })
 
-    navigate({
+    if (isSameSearch(resetSearch, searchParams)) {
+      void refreshLogs()
+      return
+    }
+    void navigate({
       to: '/usage-logs/$section',
       params: { section: 'common' },
-      search: {
-        page: 1,
-        ...resetSearch,
-      },
+      search: resetSearch,
     })
-  }, [navigate])
+  }, [navigate, refreshLogs, searchParams])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
