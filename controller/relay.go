@@ -877,7 +877,6 @@ func executeTaskSubmissionWith(
 		ResellerOwnerID:     relayInfo.ResellerOwnerID,
 		ResellerRetailRatio: relayInfo.ResellerRetailRatio,
 		ResellerCostRatio:   relayInfo.ResellerCostRatio,
-		ResellerPath:        relayInfo.ResellerPath,
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

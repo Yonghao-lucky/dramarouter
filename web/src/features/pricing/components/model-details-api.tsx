@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Gauge,
   KeyRound,
+  Route,
   ScrollText,
   Sigma,
   Zap,
@@ -47,6 +48,12 @@ import {
   type SupportedParameter,
 } from '../lib/mock-stats'
 import { replaceModelInPath } from '../lib/model-helpers'
+import {
+  buildVideoApiSample,
+  videoUsageDoc,
+  type VideoApiOperationId,
+  type VideoSampleLang,
+} from '../lib/video-usage-docs'
 import type { PricingModel } from '../types'
 
 // ---------------------------------------------------------------------------
@@ -72,6 +79,13 @@ const LANG_HIGHLIGHT: Record<Lang, BundledLanguage> = {
   python: 'python',
   typescript: 'typescript',
   javascript: 'javascript',
+}
+
+// The raw endpoint type is an internal key ("openai-video"). Customers know
+// these surfaces by protocol name, so the tab shows the protocol and its path.
+const ENDPOINT_SAMPLE_LABELS: Record<string, string> = {
+  'openai-response': 'Responses',
+  'openai-video': 'Video',
 }
 
 type SampleContext = {
@@ -423,6 +437,102 @@ function buildImageSample(lang: Lang, ctx: SampleContext): string {
   ].join('\n')
 }
 
+function buildVideoSample(lang: Lang, ctx: SampleContext): string {
+  const url = `${ctx.baseUrl}${ctx.endpointPath}`
+  const prompt = 'A cat playing piano on a rainy neon street.'
+
+  if (lang === 'curl') {
+    const body = JSON.stringify(
+      { model: ctx.modelName, prompt, seconds: 5, size: '768P' },
+      null,
+      2
+    )
+    return [
+      `# 1. Create the task`,
+      `curl ${url} \\`,
+      `  -H "Authorization: Bearer $${ctx.apiKeyEnv}" \\`,
+      `  -H "Content-Type: application/json" \\`,
+      `  -d '${body.replace(/\n/g, '\n     ')}'`,
+      '',
+      `# 2. Poll until status is completed, then read .url`,
+      `curl ${ctx.baseUrl}/v1/videos/<VIDEO_ID> \\`,
+      `  -H "Authorization: Bearer $${ctx.apiKeyEnv}"`,
+    ].join('\n')
+  }
+  if (lang === 'python') {
+    return [
+      'import time',
+      '',
+      'from openai import OpenAI',
+      '',
+      `client = OpenAI(base_url="${ctx.baseUrl}/v1", api_key="<YOUR_API_KEY>")`,
+      '',
+      'job = client.videos.create(',
+      `    model="${ctx.modelName}",`,
+      `    prompt="${prompt}",`,
+      '    seconds=5,',
+      `    size="768P",`,
+      ')',
+      '',
+      'while job.status not in ("completed", "failed"):',
+      '    time.sleep(5)',
+      '    job = client.videos.retrieve(job.id)',
+      '',
+      'print(job.url)',
+    ].join('\n')
+  }
+  if (lang === 'typescript') {
+    return [
+      `import OpenAI from 'openai'`,
+      '',
+      `const client = new OpenAI({`,
+      `  baseURL: '${ctx.baseUrl}/v1',`,
+      `  apiKey: process.env.${ctx.apiKeyEnv},`,
+      `})`,
+      '',
+      `let job = await client.videos.create({`,
+      `  model: '${ctx.modelName}',`,
+      `  prompt: '${prompt}',`,
+      `  seconds: 5,`,
+      `  size: '768P',`,
+      `})`,
+      '',
+      `while (job.status !== 'completed' && job.status !== 'failed') {`,
+      `  await new Promise((resolve) => setTimeout(resolve, 5000))`,
+      `  job = await client.videos.retrieve(job.id)`,
+      `}`,
+      '',
+      `console.log(job.url)`,
+    ].join('\n')
+  }
+  return [
+    `const created = await fetch('${url}', {`,
+    `  method: 'POST',`,
+    `  headers: {`,
+    `    Authorization: \`Bearer \${process.env.${ctx.apiKeyEnv}}\`,`,
+    `    'Content-Type': 'application/json',`,
+    `  },`,
+    `  body: JSON.stringify({`,
+    `    model: '${ctx.modelName}',`,
+    `    prompt: '${prompt}',`,
+    `    seconds: 5,`,
+    `    size: '768P',`,
+    `  }),`,
+    `})`,
+    `const job = await created.json()`,
+    '',
+    `let detail = job`,
+    `while (detail.status !== 'completed' && detail.status !== 'failed') {`,
+    `  await new Promise((resolve) => setTimeout(resolve, 5000))`,
+    `  detail = await fetch(\`${ctx.baseUrl}/v1/videos/\${job.id}\`, {`,
+    `    headers: { Authorization: \`Bearer \${process.env.${ctx.apiKeyEnv}}\` },`,
+    `  }).then((res) => res.json())`,
+    `}`,
+    '',
+    `console.log(detail.url)`,
+  ].join('\n')
+}
+
 function buildSample(
   lang: Lang,
   endpointType: string,
@@ -433,6 +543,7 @@ function buildSample(
   if (endpointType === 'embeddings' || endpointType === 'jina-rerank')
     return buildEmbeddingSample(lang, ctx)
   if (endpointType === 'image-generation') return buildImageSample(lang, ctx)
+  if (endpointType === 'openai-video') return buildVideoSample(lang, ctx)
   return buildChatSample(lang, ctx)
 }
 
@@ -509,7 +620,7 @@ function CodeSamplesSection(props: {
                   value={ep.type}
                   className='h-7 px-2.5 text-xs'
                 >
-                  {ep.type}
+                  {ENDPOINT_SAMPLE_LABELS[ep.type] ?? ep.type}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -724,6 +835,240 @@ function RateLimitsSection(props: { model: PricingModel }) {
 // Authentication preview
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Video endpoints + usage docs
+// ---------------------------------------------------------------------------
+
+const VIDEO_SAMPLE_LANGS: VideoSampleLang[] = [
+  'curl',
+  'python',
+  'typescript',
+]
+
+// Video models expose several protocols at once, so a single sample cannot
+// teach the contract: every operation (create, poll) for every protocol gets
+// its own tab, rendered from the model's own route table.
+function VideoApiDocsSection(props: {
+  model: PricingModel
+  baseUrl: string
+}) {
+  const { t } = useTranslation()
+  const doc = useMemo(
+    () => videoUsageDoc(props.model.model_name || ''),
+    [props.model.model_name]
+  )
+  const [operation, setOperation] = useState<VideoApiOperationId>(
+    doc?.endpoints[0]?.id ?? 'minimax-create'
+  )
+  const [lang, setLang] = useState<VideoSampleLang>('curl')
+
+  if (!doc) return null
+
+  const active =
+    doc.endpoints.find((endpoint) => endpoint.id === operation) ??
+    doc.endpoints[0]
+
+  return (
+    <>
+      <section>
+        <SectionTitle icon={Route}>{t('Endpoints')}</SectionTitle>
+        <StaticDataTable
+          className={tableStyles.sectionContainer}
+          headerRowClassName={tableStyles.mutedHeaderRow}
+          data={doc.endpoints}
+          getRowKey={(endpoint) => endpoint.id}
+          getRowClassName={() => 'hover:bg-muted/20'}
+          columns={[
+            {
+              id: 'method',
+              header: t('Method'),
+              className: 'h-9 w-20',
+              cellClassName: tableStyles.topCell,
+              cell: (endpoint) => (
+                <Badge
+                  variant={endpoint.method === 'POST' ? 'default' : 'secondary'}
+                  className='h-6 rounded px-2 font-mono text-[11px] font-medium'
+                >
+                  {endpoint.method}
+                </Badge>
+              ),
+            },
+            {
+              id: 'path',
+              header: t('Path'),
+              className: 'h-9 w-64',
+              cellClassName: tableStyles.topCell,
+              cell: (endpoint) => (
+                <code className='font-mono text-sm'>{endpoint.path}</code>
+              ),
+            },
+            {
+              id: 'protocol',
+              header: t('Protocol'),
+              className: 'h-9 w-32',
+              cellClassName: 'py-2 text-muted-foreground text-sm',
+              cell: (endpoint) => endpoint.protocol,
+            },
+            {
+              id: 'summary',
+              header: t('Description'),
+              className: 'h-9',
+              cellClassName: tableStyles.topMutedCell,
+              cell: (endpoint) => t(endpoint.summary),
+            },
+          ]}
+        />
+      </section>
+
+      <section>
+        <SectionTitle icon={ScrollText}>{t('Request example')}</SectionTitle>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Tabs
+            value={operation}
+            onValueChange={(value) =>
+              setOperation(value as VideoApiOperationId)
+            }
+          >
+            <TabsList className='bg-muted/40 h-8 flex-wrap p-0.5'>
+              {doc.endpoints.map((endpoint) => (
+                <TabsTrigger
+                  key={endpoint.id}
+                  value={endpoint.id}
+                  className='h-7 px-2.5 text-xs'
+                >
+                  {endpoint.method} {endpoint.path.split('/').pop()}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <Tabs
+            value={lang}
+            onValueChange={(value) => setLang(value as VideoSampleLang)}
+            className='ml-auto'
+          >
+            <TabsList className='bg-muted/40 h-8 p-0.5'>
+              {VIDEO_SAMPLE_LANGS.map((value) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className='h-7 px-2.5 text-xs'
+                >
+                  {LANG_LABELS[value]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
+        <div className='mt-3'>
+          <CodeBlock
+            code={buildVideoApiSample(active.id, lang, {
+              baseUrl: props.baseUrl,
+              apiKeyEnv: 'NEW_API_KEY',
+              modelName: props.model.model_name || '',
+            })}
+            language={LANG_HIGHLIGHT[lang]}
+          >
+            <CodeBlockCopyButton />
+          </CodeBlock>
+        </div>
+        <p className='text-muted-foreground mt-2 text-xs'>
+          {t('Full URL')}{' '}
+          <code className='bg-muted rounded px-1 py-0.5 font-mono text-[11px]'>
+            {props.baseUrl}
+            {active.path}
+          </code>{' '}
+          {t('· replace placeholders with the ids from the create response.')}
+        </p>
+      </section>
+    </>
+  )
+}
+
+// Video models bill on dimensions the plugin declares, so the parameter table
+// comes from the model's own request contract rather than the generic
+// chat/fps template that does not apply to them.
+function UsageParametersSection(props: { model: PricingModel }) {
+  const { t } = useTranslation()
+  const doc = useMemo(
+    () => videoUsageDoc(props.model.model_name || ''),
+    [props.model.model_name]
+  )
+  if (!doc) return null
+
+  return (
+    <section>
+      <SectionTitle icon={Sigma}>{t('Request parameters')}</SectionTitle>
+      <StaticDataTable
+        className={tableStyles.sectionContainer}
+        headerRowClassName={tableStyles.mutedHeaderRow}
+        data={doc.parameters}
+        getRowKey={(param) => param.name}
+        getRowClassName={() => 'hover:bg-muted/20'}
+        columns={[
+          {
+            id: 'parameter',
+            header: t('Parameter'),
+            className: 'h-9 w-52',
+            cellClassName: tableStyles.topCell,
+            cell: (p) => (
+              <div className='flex items-center gap-1.5'>
+                <code className='font-mono text-sm font-medium'>{p.name}</code>
+                {p.required && (
+                  <Badge
+                    variant='outline'
+                    className='h-6 border-rose-500/40 px-2 text-sm text-rose-600 dark:text-rose-400'
+                  >
+                    {t('required')}
+                  </Badge>
+                )}
+              </div>
+            ),
+          },
+          {
+            id: 'type',
+            header: t('Type'),
+            className: 'h-9 w-24',
+            cellClassName: tableStyles.topCell,
+            cell: (p) => (
+              <Badge
+                variant='secondary'
+                className='h-7 rounded-full px-2.5 font-mono text-sm font-normal'
+              >
+                {p.type}
+              </Badge>
+            ),
+          },
+          {
+            id: 'range',
+            header: t('Default / range'),
+            className: 'h-9 w-40',
+            cellClassName: tableStyles.topCell,
+            cell: (p) => (
+              <ParamRangeCell
+                param={{ ...p, descriptionKey: p.description }}
+              />
+            ),
+          },
+          {
+            id: 'description',
+            header: t('Description'),
+            className: 'h-9',
+            cellClassName: tableStyles.topMutedCell,
+            cell: (p) => t(p.description),
+          },
+        ]}
+      />
+      <div className='bg-muted/20 mt-3 space-y-1.5 rounded-lg border px-3 py-2.5'>
+        {doc.notes.map((note) => (
+          <p key={note} className='text-muted-foreground text-xs'>
+            • {t(note)}
+          </p>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function AuthSection() {
   const { t } = useTranslation()
   return (
@@ -762,9 +1107,30 @@ export function ModelDetailsApi(props: {
   model: PricingModel
   endpointMap: Record<string, { path?: string; method?: string }>
 }) {
+  const { status } = useStatus()
+  const baseUrl = useMemo(() => {
+    const candidate =
+      (status as Record<string, unknown> | null)?.server_address ??
+      (status as Record<string, unknown> | null)?.serverAddress ??
+      (status?.data as Record<string, unknown> | undefined)?.server_address ??
+      (status?.data as Record<string, unknown> | undefined)?.serverAddress
+    if (candidate && typeof candidate === 'string') {
+      return candidate.replace(/\/$/, '')
+    }
+    if (typeof window !== 'undefined') return window.location.origin
+    return 'https://api.example.com'
+  }, [status])
+
   return (
     <div className='space-y-6'>
-      <CodeSamplesSection model={props.model} endpointMap={props.endpointMap} />
+      {videoUsageDoc(props.model.model_name || '') ? null : (
+        <CodeSamplesSection
+          model={props.model}
+          endpointMap={props.endpointMap}
+        />
+      )}
+      <VideoApiDocsSection model={props.model} baseUrl={baseUrl} />
+      <UsageParametersSection model={props.model} />
       <AuthSection />
       <SupportedParametersSection model={props.model} />
       <RateLimitsSection model={props.model} />

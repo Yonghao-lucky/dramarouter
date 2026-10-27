@@ -1,8 +1,10 @@
 package billingexpr
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -107,6 +109,37 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, params TokenP
 				return nil
 			}
 			return request.Usage[strings.TrimSpace(name)]
+		},
+		// number coerces an optional value to a float64 and falls back when it is
+		// absent or not numeric. Without it a missing usage fact multiplies as
+		// <nil> and aborts the whole expression, which turns an ordinary
+		// incomplete request into a billing error.
+		"number": func(value interface{}, fallback float64) float64 {
+			switch typed := value.(type) {
+			case nil:
+				return fallback
+			case float64:
+				return typed
+			case float32:
+				return float64(typed)
+			case int:
+				return float64(typed)
+			case int64:
+				return float64(typed)
+			case json.Number:
+				if parsed, err := typed.Float64(); err == nil {
+					return parsed
+				}
+				return fallback
+			case string:
+				parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+				if err != nil {
+					return fallback
+				}
+				return parsed
+			default:
+				return fallback
+			}
 		},
 		"has": func(source interface{}, substr string) bool {
 			if source == nil || substr == "" {

@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math"
+	"maps"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -24,18 +29,15 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	// 支持任务仅按次计费
 	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
+	} else if calculation := taskBillingCalculation(info); calculation != "" {
+		logContent = fmt.Sprintf("%s，%s", logContent, calculation)
 	} else {
 		var contents []string
 		if otherRatios := info.PriceData.OtherRatios(); len(otherRatios) > 0 {
-			for key, ra := range otherRatios {
-				if 1.0 != ra {
+			for _, key := range slices.Sorted(maps.Keys(otherRatios)) {
+				if ra := otherRatios[key]; 1.0 != ra {
 					contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
 				}
-			}
-		}
-		if snap := info.TieredBillingSnapshot; snap != nil {
-			for key, value := range snap.UsageFacts {
-				contents = append(contents, fmt.Sprintf("%s: %v", key, value))
 			}
 		}
 		if len(contents) > 0 {
@@ -104,6 +106,89 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+}
+
+// ---------------------------------------------------------------------------
+// 消费日志计费说明
+// ---------------------------------------------------------------------------
+
+// taskBillingCalculation renders the billed arithmetic for a task consume log.
+// It substitutes the recorded usage facts into the matched tier expression so
+// the log reads as a检查able calculation instead of an unordered parameter
+// vector, e.g.
+//
+//	计费 768P：max(0, 0 - 5) * 0.03 + 0 * 0.075 + 4 * 0.075 = $0.30 × 分组 0.40 = $0.12
+//
+// Returns "" when the request was not billed by an expression; callers then
+// keep the ratio parameter form.
+func taskBillingCalculation(info *relaycommon.RelayInfo) string {
+	snap := info.TieredBillingSnapshot
+	if snap == nil {
+		return ""
+	}
+	quotaPerUnit := snap.QuotaPerUnit
+	if quotaPerUnit <= 0 {
+		quotaPerUnit = common.QuotaPerUnit
+	}
+	if quotaPerUnit <= 0 {
+		return ""
+	}
+
+	header := "计费"
+	if tier := strings.TrimSpace(snap.EstimatedTier); tier != "" {
+		header = "计费 " + tier
+	}
+
+	body, ok := billingexpr.RenderTierCalculation(snap.ExprString, snap.EstimatedTier, snap.UsageFacts)
+	if !ok {
+		if len(snap.UsageFacts) == 0 {
+			return ""
+		}
+		body = formatTaskUsageFacts(snap.UsageFacts)
+	}
+
+	// EstimatedQuotaBeforeGroup is the expression result in quota, i.e. USD ×
+	// QuotaPerUnit. Older snapshots left it zero, so fall back to the charged
+	// quota divided back through the group ratio.
+	cost := snap.EstimatedQuotaBeforeGroup / quotaPerUnit
+	if cost <= 0 && snap.EstimatedQuotaAfterGroup > 0 {
+		groupRatio := snap.GroupRatio
+		if groupRatio <= 0 {
+			groupRatio = 1
+		}
+		cost = float64(snap.EstimatedQuotaAfterGroup) / groupRatio / quotaPerUnit
+	}
+
+	calculation := fmt.Sprintf("%s：%s = $%s", header, body, formatMoney(cost))
+	if groupRatio := info.PriceData.GroupRatioInfo.GroupRatio; groupRatio > 0 && groupRatio != 1 {
+		charged := float64(info.PriceData.Quota) / quotaPerUnit
+		calculation = fmt.Sprintf("%s × 分组 %.2f = $%s", calculation, groupRatio, formatMoney(charged))
+	}
+	return calculation
+}
+
+// formatTaskUsageFacts renders the billed inputs in a stable order. Usage facts
+// are a map, so iterating them directly would scramble the log text between
+// identical requests.
+func formatTaskUsageFacts(facts map[string]any) string {
+	parts := make([]string, 0, len(facts))
+	for _, key := range slices.Sorted(maps.Keys(facts)) {
+		parts = append(parts, fmt.Sprintf("%s: %v", key, facts[key]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatMoney(amount float64) string {
+	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 {
+		return "0.00"
+	}
+	text := strings.TrimRight(strings.TrimRight(strconv.FormatFloat(amount, 'f', 4, 64), "0"), ".")
+	if dot := strings.IndexByte(text, '.'); dot < 0 {
+		return text + ".00"
+	} else if len(text)-dot == 2 {
+		return text + "0"
+	}
+	return text
 }
 
 // ---------------------------------------------------------------------------

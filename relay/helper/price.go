@@ -70,8 +70,8 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 	}
 
 	// Reseller layer: a customer-specific or reseller-default retail price wins
-	// over both group ratios, and carries the wholesale ratios needed downstream
-	// for pool funding and frozen margin evidence.
+	// over both group ratios, and carries the wholesale ratio downstream as
+	// margin evidence. Money moves only when the reseller transfers quota.
 	applyResellerPricing(relayInfo, &groupRatioInfo)
 
 	return groupRatioInfo
@@ -81,7 +81,6 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 // a configured reseller price for this billing group.
 func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *hosttypes.GroupRatioInfo) {
 	relayInfo.ResellerOwnerID = 0
-	relayInfo.ResellerPath = ""
 	relayInfo.ResellerCostRatio = 0
 	relayInfo.ResellerRetailRatio = 0
 	if relayInfo.UserId <= 0 || relayInfo.UsingGroup == "" {
@@ -101,11 +100,6 @@ func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *host
 	relayInfo.ResellerOwnerID = pricing.OwnerID
 	relayInfo.ResellerRetailRatio = pricing.Retail
 	relayInfo.ResellerCostRatio = pricing.CostRatio
-	if pricing.OwnerID > 0 && pricing.CostRatio > 0 {
-		relayInfo.ResellerPath = "pool"
-	} else {
-		relayInfo.ResellerPath = "self"
-	}
 }
 
 // imageResolutionSize 取出本次请求的出图尺寸。
@@ -403,7 +397,11 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		Len: float64(promptTokens),
 	}, requestInput)
 	if err != nil {
-		return hosttypes.PriceData{}, fmt.Errorf("model %s tiered expr run failed: %w", info.OriginModelName, err)
+		// expr-lang reports the offending source line with the whole expression,
+		// so the raw error would hand the administrator's pricing rules to the
+		// caller. Keep the detail in the server log and answer generically.
+		common.SysError(fmt.Sprintf("model %s tiered expr run failed: %v", info.OriginModelName, err))
+		return hosttypes.PriceData{}, fmt.Errorf("model %s billing expression failed; contact the administrator", info.OriginModelName)
 	}
 
 	// Expression coefficients are $/1M tokens prices; convert to quota the same way per-call billing does.

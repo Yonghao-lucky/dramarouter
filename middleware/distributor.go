@@ -178,6 +178,10 @@ func Distribute() func(c *gin.Context) {
 						return
 					}
 					if channel == nil {
+						if message, unsupported := unsupportedTaskPluginEndpointMessage(c, modelRequest.Model); unsupported {
+							abortWithOpenAiMessage(c, http.StatusBadRequest, message, types.ErrorCodeInvalidRequest)
+							return
+						}
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
@@ -404,6 +408,38 @@ func getJSONStringValue(result gjson.Result, field string) (string, error) {
 		return "", fmt.Errorf("field %s must be a string", field)
 	}
 	return result.String(), nil
+}
+
+// unsupportedTaskPluginEndpointMessage reports a task-plugin model that is
+// being called on an endpoint the plugin does not serve. It only runs after
+// channel selection already failed, so a model that also has a compatible
+// channel never reaches it. Naming the endpoint is clearer than the generic
+// "no available channel", which reads like an outage.
+func unsupportedTaskPluginEndpointMessage(c *gin.Context, modelName string) (string, bool) {
+	if c == nil || strings.TrimSpace(modelName) == "" {
+		return "", false
+	}
+	generation := jsplugin.DefaultRegistry.Generation()
+	if generation == nil {
+		return "", false
+	}
+	lookupModel := modelName
+	if declared, ok := generation.CanonicalModel(modelName); ok {
+		lookupModel = declared
+	}
+	if _, ok := generation.GetByModel(lookupModel); !ok {
+		return "", false
+	}
+	if _, ok := generation.LookupEndpoint(c.Request.Method, c.Request.URL.Path, lookupModel); ok {
+		return "", false
+	}
+	if _, ok := generation.LookupDeclaredRoute(c.Request.Method, c.Request.URL.Path); ok {
+		return "", false
+	}
+	return i18n.T(c, i18n.MsgDistributorUnsupportedEndpoint, map[string]any{
+		"Model":    modelName,
+		"Endpoint": c.Request.URL.Path,
+	}), true
 }
 
 func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {

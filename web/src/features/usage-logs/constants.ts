@@ -193,6 +193,27 @@ export const TASK_ACTIONS = {
 } as const
 
 /**
+ * Persisted (canonical) task actions are snake_case; the UI vocabulary above
+ * keeps the historical camelCase aliases. Without this mapping a stored
+ * `text_to_video` falls through to "Unknown" and never matches video actions.
+ */
+export const TASK_ACTION_ALIASES: Record<string, string> = {
+  image_to_video: TASK_ACTIONS.GENERATE,
+  text_to_video: TASK_ACTIONS.TEXT_GENERATE,
+  first_tail_to_video: TASK_ACTIONS.FIRST_TAIL_GENERATE,
+  reference_to_video: TASK_ACTIONS.REFERENCE_GENERATE,
+  remix: TASK_ACTIONS.REMIX_GENERATE,
+}
+
+/**
+ * Normalize a persisted task action to the UI vocabulary.
+ */
+export function normalizeTaskAction(action: string | undefined): string {
+  if (!action) return ''
+  return TASK_ACTION_ALIASES[action] ?? action
+}
+
+/**
  * Task status
  */
 export const TASK_STATUS = {

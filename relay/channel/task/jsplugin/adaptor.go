@@ -538,6 +538,12 @@ func (a *TaskAdaptor) FetchBatchTasks(baseURL, key string, taskIDs []string, pro
 
 func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy string) (*http.Response, error) {
 	ctx := map[string]any{"taskId": body["task_id"], "action": body["action"], "requestBody": body, "baseUrl": baseURL}
+	// Query hooks run outside the relay request, so the model identity has to
+	// travel in the poll body. Plugins pick the query path by model (MiniMax /v2
+	// queries by path segment, /v1 by query string), and without it they fall
+	// back to the wrong upstream route.
+	ctx["model"] = body["model"]
+	ctx["upstreamModel"] = body["model"]
 	auth, err := resolveAuth(a.plugin.Meta.Auth, key, proxy)
 	if err != nil {
 		return nil, err

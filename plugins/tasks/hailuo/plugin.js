@@ -8,11 +8,11 @@ const VIDEO_SECONDS_FIELD = {
 
 const RESOLUTION_DESCRIPTION = { en: "Output video resolution", zh: "输出视频分辨率" };
 
-// MiniMax-H3 allows duration 4 to 15 and renders 768P or 2K.
+// MiniMax-H3 allows duration 4 to 15 and renders 768P, 1080P or 2K.
 const H3_USAGE_SCHEMA = {
   seconds: VIDEO_SECONDS_FIELD,
   resolution: {
-    enum: ["768P", "2K"],
+    enum: ["768P", "1080P", "2K"],
     description: RESOLUTION_DESCRIPTION,
   },
   // Input image count (estimated at submit, actual on completion).
@@ -89,7 +89,7 @@ export const meta = {
     en: "MiniMax Hailuo video generation (text-to-video, image-to-video, and MiniMax-H3 multimodal reference)",
     zh: "MiniMax 海螺视频生成（文生视频、图生视频、MiniMax-H3 多模态参考生视频）",
   },
-  version: "1.3.0",
+  version: "1.4.0",
   author: { name: "QuantumNous" },
   channelTypes: [35],
   models: [H3_MODEL].concat(V1_MODELS),
@@ -110,6 +110,7 @@ export const meta = {
     { label: "02 512P 10s", facts: { seconds: 10, resolution: "512P", input_images: 0, input_video_seconds: 0 } },
     { label: "01-series 720P 6s", facts: { seconds: 6, resolution: "720P", input_images: 0, input_video_seconds: 0 } },
     { label: "H3 768P 5s", facts: { seconds: 5, resolution: "768P", input_images: 0, input_video_seconds: 0 } },
+    { label: "H3 1080P 5s", facts: { seconds: 5, resolution: "1080P", input_images: 0, input_video_seconds: 0 } },
     { label: "H3 2K 5s · 9 images", facts: { seconds: 5, resolution: "2K", input_images: 9, input_video_seconds: 0 } },
     { label: "H3 2K 5s · input video", facts: { seconds: 5, resolution: "2K", input_images: 0, input_video_seconds: 15 } },
   ],
@@ -119,6 +120,7 @@ export const meta = {
       schema: H3_USAGE_SCHEMA,
       examples: [
         { label: "H3 768P 5s", facts: { seconds: 5, resolution: "768P", input_images: 0, input_video_seconds: 0 } },
+        { label: "H3 1080P 5s", facts: { seconds: 5, resolution: "1080P", input_images: 0, input_video_seconds: 0 } },
         { label: "H3 2K 5s", facts: { seconds: 5, resolution: "2K", input_images: 0, input_video_seconds: 0 } },
         { label: "H3 2K 5s · 9 images", facts: { seconds: 5, resolution: "2K", input_images: 9, input_video_seconds: 0 } },
         { label: "H3 2K 5s · input video", facts: { seconds: 5, resolution: "2K", input_images: 0, input_video_seconds: 15 } },
@@ -152,12 +154,20 @@ export const meta = {
   ],
   // MiniMax request and response bodies, for clients and for a downstream New
   // API gateway. The task id of a query is a path parameter on both versions,
-  // where MiniMax /v1 reads it from the query string.
+  // where MiniMax /v1 reads it from the query string. The unprefixed /v2 routes
+  // mirror the published MiniMax contract so an official SDK pointed at this
+  // gateway reaches the same hooks as the /hailuo-prefixed names.
   routes: [
     { method: "POST", path: "/hailuo/v1/video_generation", type: "submit", decode: "createTask", render: "taskCreated", models: V1_MODELS },
     { method: "GET", path: "/hailuo/v1/query/video_generation/:task_id", type: "query", render: "taskStatus" },
     { method: "POST", path: "/hailuo/v2/video_generation", type: "submit", decode: "createH3Task", render: "taskCreated", models: [H3_MODEL] },
     { method: "GET", path: "/hailuo/v2/query/video_generation/:task_id", type: "query", render: "h3TaskStatus" },
+    // MiniMax clients also poll the create path itself; answer it with the same
+    // snapshot so a client that only knows /v2/video_generation can poll there.
+    { method: "GET", path: "/hailuo/v2/video_generation/:task_id", type: "query", render: "h3TaskStatus" },
+    { method: "POST", path: "/v2/video_generation", type: "submit", decode: "createH3Task", render: "taskCreated", models: [H3_MODEL] },
+    { method: "GET", path: "/v2/video_generation/:task_id", type: "query", render: "h3TaskStatus" },
+    { method: "GET", path: "/v2/query/video_generation/:task_id", type: "query", render: "h3TaskStatus" },
   ],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
@@ -267,8 +277,9 @@ function h3Resolution(req) {
   if (!raw) return "768P";
   const value = raw.toUpperCase();
   if (value.includes("2K")) return "2K";
+  if (value.includes("1080")) return "1080P";
   if (value.includes("768")) return "768P";
-  throw new Error(H3_MODEL + " resolution must be 768P or 2K");
+  throw new Error(H3_MODEL + " resolution must be 768P, 1080P or 2K");
 }
 
 function h3MediaItem(type, url, role) {
@@ -288,17 +299,32 @@ function h3MediaList(source, key) {
   });
 }
 
+// The upstream accepts first_frame and last_frame only as an exact pair and
+// only at 768P, so a lone image is sent as a reference image, which every
+// resolution accepts and still guides the generation.
 function h3FrameImages(req) {
   const metadata = req.metadata || {};
   const images = h3MediaList(req, "images");
   if (images.length > H3_MAX_FRAME_IMAGES) throw new Error(H3_MODEL + " accepts at most " + H3_MAX_FRAME_IMAGES + " frame images");
-  const frames = [];
-  if (metadata.first_frame_image) frames.push(h3MediaItem("image_url", metadata.first_frame_image, "first_frame"));
-  if (metadata.last_frame_image) frames.push(h3MediaItem("image_url", metadata.last_frame_image, "last_frame"));
-  if (frames.length) return frames;
-  return images.map(function (url, index) {
-    return h3MediaItem("image_url", url, index === 0 ? "first_frame" : "last_frame");
+  const first = metadata.first_frame_image;
+  const last = metadata.last_frame_image;
+  if (first && last) {
+    return [h3MediaItem("image_url", first, "first_frame"), h3MediaItem("image_url", last, "last_frame")];
+  }
+  if (first || last) return [h3MediaItem("image_url", first || last, "reference_image")];
+  if (images.length === 0) return [];
+  if (images.length === 1) return [h3MediaItem("image_url", images[0], "reference_image")];
+  return [h3MediaItem("image_url", images[0], "first_frame"), h3MediaItem("image_url", images[1], "last_frame")];
+}
+
+// Frame-to-frame interpolation exists only in the 768P tier.
+function h3ValidateFrameResolution(content, resolution) {
+  const usesFrame = content.some(function (item) {
+    return item && (item.role === "first_frame" || item.role === "last_frame");
   });
+  if (usesFrame && resolution !== "768P") {
+    throw new Error(H3_MODEL + " first_frame/last_frame are supported only at 768P; use reference images at " + resolution);
+  }
 }
 
 function validateH3Content(items) {
@@ -392,11 +418,29 @@ function h3HasVisualContent(content) {
 // aspect ratio can be inherited from a visual input.
 function h3Ratio(req, content) {
   const metadata = req.metadata || {};
-  const ratio = trimmed(metadata.ratio);
-  if (!ratio) return h3HasVisualContent(content) ? "adaptive" : "16:9";
+  const ratio = trimmed(metadata.ratio).toLowerCase();
+  // MiniMax rejects `adaptive` on this contract (it answers with a 400 naming
+  // the supported combinations), so an omitted ratio must still be concrete.
+  if (!ratio) return "16:9";
+  if (ratio === "adaptive") return h3HasVisualContent(content) ? "adaptive" : "16:9";
   if (!H3_RATIOS.includes(ratio)) throw new Error(H3_MODEL + " ratio must be one of " + H3_RATIOS.join(", "));
-  if (ratio === "adaptive" && !h3HasVisualContent(content)) throw new Error(H3_MODEL + " ratio adaptive requires an image or video input");
   return ratio;
+}
+
+// The upstream accepts a narrower ratio set than the published enum: 768P adds
+// 1:1, while 1080P and 2K only allow 16:9 and 9:16. Validating here turns an
+// opaque upstream 400 into a message that names the accepted values.
+const H3_RATIOS_BY_RESOLUTION = {
+  "768P": ["16:9", "9:16", "1:1"],
+  "1080P": ["16:9", "9:16"],
+  "2K": ["16:9", "9:16"],
+};
+
+function h3ValidateRatioForResolution(resolution, ratio) {
+  if (ratio === "adaptive") return;
+  const allowed = H3_RATIOS_BY_RESOLUTION[resolution];
+  if (!allowed || allowed.indexOf(ratio) >= 0) return;
+  throw new Error(H3_MODEL + " " + resolution + " supports ratio " + allowed.join(", "));
 }
 
 function h3QueryTask(body) {
@@ -555,13 +599,17 @@ export function buildSubmitRequest(ctx) {
   const metadata = req.metadata || {};
   if (isH3(model)) {
     const content = h3Content(req);
+    const resolution = h3Resolution(req);
+    const ratio = h3Ratio(req, content);
+    h3ValidateRatioForResolution(resolution, ratio);
+    h3ValidateFrameResolution(content, resolution);
     const h3Body = Object.assign(
       {
         model: model,
         content: content,
-        resolution: h3Resolution(req),
+        resolution: resolution,
         duration: h3Duration(req),
-        ratio: h3Ratio(req, content),
+        ratio: ratio,
       },
       definedFields(metadata, H3_METADATA_FIELDS)
     );
@@ -734,7 +782,7 @@ export function extractUsageOnComplete(_task, _taskResult, body) {
   if (h3Task) {
     const resolution = trimmed(h3Task.resolution).toUpperCase();
     const facts = {};
-    if (resolution === "2K" || resolution === "768P") facts.resolution = resolution;
+    if (resolution === "2K" || resolution === "1080P" || resolution === "768P") facts.resolution = resolution;
     const usage = h3Task.usage && typeof h3Task.usage === "object" && !Array.isArray(h3Task.usage) ? h3Task.usage : {};
     const fields = [
       { key: "seconds", value: usage.output_seconds, minimum: H3_MIN_DURATION, maximum: H3_MAX_DURATION, integer: false },

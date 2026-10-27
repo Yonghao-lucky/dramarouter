@@ -203,7 +203,6 @@ type TaskBillingContext struct {
 	ResellerOwnerID     int     `json:"reseller_owner_id,omitempty"`
 	ResellerRetailRatio float64 `json:"reseller_retail_ratio,omitempty"`
 	ResellerCostRatio   float64 `json:"reseller_cost_ratio,omitempty"`
-	ResellerPath        string  `json:"reseller_path,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
@@ -213,6 +212,22 @@ func (t *Task) GetUpstreamTaskID() string {
 		return t.PrivateData.UpstreamTaskID
 	}
 	return t.TaskID
+}
+
+// GetQueryModelName 获取轮询时用于选择上游查询路径的模型名。
+// 插件按模型决定查询路由（MiniMax /v2 用路径参数、/v1 用查询串），
+// 优先取提交时记录的上游模型名，回退到用户请求的模型名。
+func (t *Task) GetQueryModelName() string {
+	if t.Properties.UpstreamModelName != "" {
+		return t.Properties.UpstreamModelName
+	}
+	if t.Properties.OriginModelName != "" {
+		return t.Properties.OriginModelName
+	}
+	if bc := t.PrivateData.BillingContext; bc != nil {
+		return bc.OriginModelName
+	}
+	return ""
 }
 
 // GetResultURL 获取任务结果 URL（视频地址等）

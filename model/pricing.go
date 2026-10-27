@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"sync"
@@ -18,27 +19,27 @@ import (
 )
 
 type Pricing struct {
-	ModelName              string                               `json:"model_name"`
-	Description            string                               `json:"description,omitempty"`
-	Icon                   string                               `json:"icon,omitempty"`
-	Tags                   string                               `json:"tags,omitempty"`
-	VendorID               int                                  `json:"vendor_id,omitempty"`
-	QuotaType              int                                  `json:"quota_type"`
-	ModelRatio             float64                              `json:"model_ratio"`
-	ModelPrice             float64                              `json:"model_price"`
-	OwnerBy                string                               `json:"owner_by"`
-	CompletionRatio        float64                              `json:"completion_ratio"`
-	CacheRatio             *float64                             `json:"cache_ratio,omitempty"`
-	CreateCacheRatio       *float64                             `json:"create_cache_ratio,omitempty"`
-	ImageRatio             *float64                             `json:"image_ratio,omitempty"`
-	AudioRatio             *float64                             `json:"audio_ratio,omitempty"`
-	AudioCompletionRatio   *float64                             `json:"audio_completion_ratio,omitempty"`
-	EnableGroup            []string                             `json:"enable_groups"`
-	SupportedEndpointTypes []constant.EndpointType              `json:"supported_endpoint_types"`
-	BillingMode            string                               `json:"billing_mode,omitempty"`
-	BillingExpr            string                               `json:"billing_expr,omitempty"`
-	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
-	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
+	ModelName              string                                    `json:"model_name"`
+	Description            string                                    `json:"description,omitempty"`
+	Icon                   string                                    `json:"icon,omitempty"`
+	Tags                   string                                    `json:"tags,omitempty"`
+	VendorID               int                                       `json:"vendor_id,omitempty"`
+	QuotaType              int                                       `json:"quota_type"`
+	ModelRatio             float64                                   `json:"model_ratio"`
+	ModelPrice             float64                                   `json:"model_price"`
+	OwnerBy                string                                    `json:"owner_by"`
+	CompletionRatio        float64                                   `json:"completion_ratio"`
+	CacheRatio             *float64                                  `json:"cache_ratio,omitempty"`
+	CreateCacheRatio       *float64                                  `json:"create_cache_ratio,omitempty"`
+	ImageRatio             *float64                                  `json:"image_ratio,omitempty"`
+	AudioRatio             *float64                                  `json:"audio_ratio,omitempty"`
+	AudioCompletionRatio   *float64                                  `json:"audio_completion_ratio,omitempty"`
+	EnableGroup            []string                                  `json:"enable_groups"`
+	SupportedEndpointTypes []constant.EndpointType                   `json:"supported_endpoint_types"`
+	BillingMode            string                                    `json:"billing_mode,omitempty"`
+	BillingExpr            string                                    `json:"billing_expr,omitempty"`
+	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema      `json:"billing_usage_schema,omitempty"`
+	BillingUsageExamples   []jsplugin.UsageExample                   `json:"billing_usage_examples,omitempty"`
 	PeakPricing            *ratio_setting.PeakPricingView            `json:"peak_pricing,omitempty"`
 	ImageResolution        *ratio_setting.ImageResolutionPricingView `json:"image_resolution_pricing,omitempty"`
 	PricingVersion         string                                    `json:"pricing_version,omitempty"`
@@ -129,6 +130,20 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 }
 
 func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {
+	if ability.ChannelType == constant.ChannelTypeTaskPlugin {
+		// A task-plugin channel never speaks the model's text protocol: its
+		// endpoints are exactly the host protocols the plugin claims. Without
+		// this branch every task model advertises "openai" and the pricing page
+		// shows a chat-completions sample for a video model.
+		if generation := jsplugin.DefaultRegistry.Generation(); generation != nil {
+			if plugin, ok := generation.GetByModel(ability.Model); ok && plugin != nil {
+				if endpoints := taskPluginEndpointTypes(plugin.Meta.Protocols, plugin.Meta.Routes); len(endpoints) > 0 {
+					return endpoints
+				}
+			}
+		}
+		return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
+	}
 	if ability.ChannelType != constant.ChannelTypeAdvancedCustom {
 		return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
 	}
@@ -136,6 +151,38 @@ func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCusto
 		return config.SupportedEndpointTypesForModel(ability.Model)
 	}
 	return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
+}
+
+// taskPluginEndpointTypes maps the protocols a plugin claims onto the endpoint
+// types the pricing page knows how to render. Native routes a plugin declares
+// (currently the MiniMax /v2 video contract) are surfaces of their own: they
+// carry a different request body and polling path than the OpenAI video API,
+// so they are reported separately instead of collapsing into openai-video.
+func taskPluginEndpointTypes(protocols []jsplugin.ProtocolClaim, routes []jsplugin.Route) []constant.EndpointType {
+	endpoints := make([]constant.EndpointType, 0, len(protocols))
+	for _, claim := range protocols {
+		var endpoint constant.EndpointType
+		switch claim.Name {
+		case "openai_video":
+			endpoint = constant.EndpointTypeOpenAIVideo
+		case "openai_responses":
+			endpoint = constant.EndpointTypeOpenAIResponse
+		default:
+			continue
+		}
+		if !slices.Contains(endpoints, endpoint) {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	for _, route := range routes {
+		if route.Type != jsplugin.RouteTypeSubmit || route.Path != "/v2/video_generation" {
+			continue
+		}
+		if !slices.Contains(endpoints, constant.EndpointTypeMiniMaxVideo) {
+			endpoints = append(endpoints, constant.EndpointTypeMiniMaxVideo)
+		}
+	}
+	return endpoints
 }
 
 // loadPricingAdvancedCustomConfigs runs inside updatePricing while

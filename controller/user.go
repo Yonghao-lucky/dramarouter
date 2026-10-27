@@ -515,6 +515,13 @@ func GetSelf(c *gin.Context) {
 	permissions := calculateUserPermissions(userRole)
 	permissions["admin_permissions"] = authz.Capabilities(id, userRole)
 	responseData["permissions"] = permissions
+	// reseller_enabled gates the console entry so a normal account never sees a
+	// page it cannot use.
+	if profile, profileErr := model.GetResellerProfileByUser(id); profileErr == nil && profile != nil {
+		responseData["reseller_enabled"] = profile.Status == model.ResellerStatusEnabled
+	} else {
+		responseData["reseller_enabled"] = false
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

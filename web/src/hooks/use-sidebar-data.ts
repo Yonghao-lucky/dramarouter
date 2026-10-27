@@ -132,6 +132,7 @@ export function useSidebarData(): SidebarData {
             title: t('Reseller console'),
             url: '/reseller',
             icon: UsersRound,
+            requiredReseller: true,
           },
         ],
       },

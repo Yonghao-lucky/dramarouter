@@ -34,6 +34,11 @@ type BaseNavItem = {
    * `useSidebarView`). Route-level guards still enforce access independently.
    */
   requiredRole?: number
+  /**
+   * When set, the item is only shown to accounts carrying this capability flag
+   * from `/api/user/self`. Route guards still enforce access independently.
+   */
+  requiredReseller?: boolean
 }
 
 /**

@@ -29,7 +29,7 @@ func buildCostAccountingInput(relayInfo *relaycommon.RelayInfo, saleQuota int) *
 		relayInfo.CostDiscount,
 	)
 	noteQuotaClamp(relayInfo, clamp)
-	attachResellerEvidence(input, relayInfo.ResellerOwnerID, relayInfo.ResellerRetailRatio, relayInfo.ResellerCostRatio, relayInfo.ResellerPath, int64(saleQuota), relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	attachResellerEvidence(input, relayInfo.ResellerOwnerID, relayInfo.ResellerRetailRatio, relayInfo.ResellerCostRatio, int64(saleQuota), relayInfo.PriceData.GroupRatioInfo.GroupRatio)
 	return input
 }
 
@@ -53,21 +53,20 @@ func buildTaskCostAccountingInput(task *model.Task, logType int, saleQuota int) 
 	if logType == model.LogTypeRefund {
 		signedQuota = -signedQuota
 	}
-	attachResellerEvidence(input, billingContext.ResellerOwnerID, billingContext.ResellerRetailRatio, billingContext.ResellerCostRatio, billingContext.ResellerPath, signedQuota, billingContext.GroupRatio)
+	attachResellerEvidence(input, billingContext.ResellerOwnerID, billingContext.ResellerRetailRatio, billingContext.ResellerCostRatio, signedQuota, billingContext.GroupRatio)
 	return input
 }
 
-// attachResellerEvidence freezes who earns the margin on this charge and how the
-// request was funded. The margin uses the same sign as the charge, so a refund
-// records a negative margin and the daily rollup nets out naturally.
-func attachResellerEvidence(input *model.CostAccountingInput, ownerID int, retailRatio, costRatio float64, path string, signedRetailQuota int64, effectiveRatio float64) {
+// attachResellerEvidence freezes who earns the margin on this charge. The margin
+// uses the same sign as the charge, so a refund records a negative margin and the
+// daily rollup nets out naturally. It is reporting evidence: the customer pays
+// retail from their own wallet and the reseller's wholesale cost is settled when
+// quota is transferred, so every charge is marked "transfer".
+func attachResellerEvidence(input *model.CostAccountingInput, ownerID int, retailRatio, costRatio float64, signedRetailQuota int64, effectiveRatio float64) {
 	if input == nil || ownerID <= 0 || retailRatio <= 0 || costRatio <= 0 {
 		return
 	}
-	settlement := path
-	if settlement == "" {
-		settlement = "self"
-	}
+	settlement := "transfer"
 	ratio := effectiveRatio
 	if ratio <= 0 {
 		ratio = retailRatio

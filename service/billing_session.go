@@ -141,9 +141,6 @@ func (s *BillingSession) needsRefundLocked() bool {
 	if sub, ok := s.funding.(*SubscriptionFunding); ok && sub.preConsumed > 0 {
 		return true
 	}
-	if reseller, ok := s.funding.(*ResellerFunding); ok && reseller.reservedRetail > 0 {
-		return true
-	}
 	return false
 }
 
@@ -261,11 +258,6 @@ func (s *BillingSession) reserveFunding(delta int) error {
 		}
 		funding.consumed += delta
 		return nil
-	case *ResellerFunding:
-		if err := funding.Extend(delta); err != nil {
-			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
-		}
-		return nil
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, int64(delta)); err != nil {
 			return types.NewErrorWithStatusCode(
@@ -298,14 +290,6 @@ func (s *BillingSession) rollbackFundingReserve(delta int) {
 		} else {
 			funding.consumed -= delta
 		}
-	case *ResellerFunding:
-		// Reservation rollback releases the retail cap; the wholesale charge is
-		// returned by the same reservation bookkeeping.
-		if err := funding.Refund(); err != nil {
-			common.SysError("failed to roll back reseller reservation: " + err.Error())
-			return
-		}
-		funding.reservedRetail = 0
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, -int64(delta)); err != nil {
 			common.SysLog("error rolling back subscription funding reserve: " + err.Error())
@@ -346,10 +330,6 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	}
 
 	switch s.funding.Source() {
-	case BillingSourceReseller:
-		// A pool reservation is the credit limit itself; trusting it would let a
-		// customer consume past the allocation.
-		return false
 	case BillingSourceWallet:
 		return s.relayInfo.UserQuota > trustQuota
 	case BillingSourceSubscription:
@@ -391,34 +371,6 @@ func (s *BillingSession) syncRelayInfo() {
 func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preConsumedQuota int) (*BillingSession, *types.NewAPIError) {
 	if relayInfo == nil {
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
-	}
-
-	// Reseller pool first: an owned customer with a configured wholesale cost
-	// consumes allocated quota, and the platform charges the reseller wallet at
-	// wholesale. An exhausted pool falls back to the customer's own wallet at the
-	// same retail price; it never extends credit.
-	if relayInfo.ResellerPath == "pool" {
-		affordable, affordErr := model.ResellerAllocationAffordable(relayInfo.UserId, int64(preConsumedQuota))
-		if affordErr != nil {
-			return nil, types.NewError(affordErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
-		}
-		if affordable {
-			session := &BillingSession{
-				relayInfo: relayInfo,
-				funding: &ResellerFunding{
-					customerUserId: relayInfo.UserId,
-					ownerId:        relayInfo.ResellerOwnerID,
-					requestId:      relayInfo.RequestId,
-					retailRatio:    relayInfo.ResellerRetailRatio,
-					costRatio:      relayInfo.ResellerCostRatio,
-				},
-			}
-			if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
-				return nil, apiErr
-			}
-			return session, nil
-		}
-		relayInfo.ResellerPath = "self"
 	}
 
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)

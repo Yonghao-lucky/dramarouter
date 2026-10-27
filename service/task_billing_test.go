@@ -350,9 +350,10 @@ func TestLogTaskConsumptionIncludesTieredSnapshotUsageFacts(t *testing.T) {
 	assert.Equal(t, float64(5), facts["seconds"])
 	assert.NotContains(t, other, "resolution")
 	assert.NotContains(t, other, "seconds")
-	assert.Contains(t, log.Content, "计算参数：")
-	assert.Contains(t, log.Content, "resolution: 720P")
-	assert.Contains(t, log.Content, "seconds: 5")
+	// The billed arithmetic is substituted with the recorded facts so the log
+	// shows the calculation itself, not an unordered parameter vector.
+	assert.Contains(t, log.Content, "计费 720P：5 * 5")
+	assert.NotContains(t, log.Content, "计算参数：")
 }
 
 func TestLogTaskConsumptionWithoutSnapshotKeepsRatioMode(t *testing.T) {

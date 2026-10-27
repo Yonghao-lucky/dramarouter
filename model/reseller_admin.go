@@ -10,20 +10,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// GetResellerProfileByUser returns the profile bound to a platform user, or nil
-// when the user is not a reseller.
-func GetResellerProfileByUser(userId int) (*ResellerProfile, error) {
-	var profile ResellerProfile
-	err := DB.Where("user_id = ?", userId).First(&profile).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &profile, nil
-}
-
 // UpsertResellerProfile grants or updates the reseller capability. status 0
 // keeps the existing value; a new profile defaults to enabled.
 func UpsertResellerProfile(userId int, name, code string, status int) (*ResellerProfile, error) {
@@ -71,7 +57,8 @@ func ListResellerProfiles() ([]ResellerProfile, error) {
 }
 
 // SetResellerGroupCost is the platform wholesale price. It never touches a
-// customer price; it only defines what the reseller pays.
+// customer price; it only defines what the reseller pays and which groups the
+// reseller may resell.
 func SetResellerGroupCost(resellerId int, group, ratio string, enabled bool, actorId int) error {
 	if resellerId <= 0 || strings.TrimSpace(group) == "" {
 		return errors.New("invalid reseller cost")
@@ -80,17 +67,42 @@ func SetResellerGroupCost(resellerId int, group, ratio string, enabled bool, act
 	if err != nil {
 		return err
 	}
+	if normalized == "" {
+		return errors.New("cost ratio is required")
+	}
 	now := common.GetTimestamp()
-	return DB.Clauses(clause.OnConflict{
+	err = DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "reseller_id"}, {Name: "group_name"}},
 		DoUpdates: clause.AssignmentColumns([]string{"cost_ratio", "enabled", "updated_by", "updated_at"}),
 	}).Create(&ResellerGroupCost{
 		ResellerId: resellerId, GroupName: group, CostRatio: normalized, Enabled: enabled, UpdatedBy: actorId, UpdatedAt: now,
 	}).Error
+	if err != nil {
+		return err
+	}
+	return InvalidateResellerDefaultPricingCache()
 }
 
-// SetResellerDefaultPrice is the reseller's standing retail price, applied to
-// every owned customer without a customer-specific price.
+// resellerCostRatio returns the enabled wholesale ratio for one group, or 0
+// when the group is not authorized for this reseller.
+func resellerCostRatio(tx *gorm.DB, resellerId int, group string) (float64, error) {
+	var cost ResellerGroupCost
+	err := tx.Where("reseller_id = ? AND group_name = ? AND enabled = ?", resellerId, group, true).First(&cost).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	ratio, ok := parsePositiveRatio(cost.CostRatio)
+	if !ok {
+		return 0, nil
+	}
+	return ratio, nil
+}
+
+// SetResellerDefaultPrice is the reseller's standing retail price. It may never
+// sit below the reseller's own wholesale cost for the same group.
 func SetResellerDefaultPrice(resellerId int, group, ratio string, actorId int) error {
 	if resellerId <= 0 || strings.TrimSpace(group) == "" {
 		return errors.New("invalid reseller price")
@@ -99,21 +111,42 @@ func SetResellerDefaultPrice(resellerId int, group, ratio string, actorId int) e
 	if err != nil {
 		return err
 	}
-	now := common.GetTimestamp()
 	if normalized == "" {
-		return DB.Where("reseller_id = ? AND group_name = ?", resellerId, group).Delete(&ResellerDefaultPrice{}).Error
+		err = DB.Where("reseller_id = ? AND group_name = ?", resellerId, group).Delete(&ResellerDefaultPrice{}).Error
+		if err != nil {
+			return err
+		}
+		return InvalidateResellerDefaultPricingCache()
 	}
-	return DB.Clauses(clause.OnConflict{
+	costRatio, err := resellerCostRatio(DB, resellerId, group)
+	if err != nil {
+		return err
+	}
+	if costRatio <= 0 {
+		return ErrResellerGroupNotAllowed
+	}
+	price, _ := parsePositiveRatio(normalized)
+	if price < costRatio {
+		return ErrResellerPriceBelowCost
+	}
+	now := common.GetTimestamp()
+	err = DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "reseller_id"}, {Name: "group_name"}},
 		DoUpdates: clause.AssignmentColumns([]string{"ratio", "updated_by", "updated_at"}),
 	}).Create(&ResellerDefaultPrice{
 		ResellerId: resellerId, GroupName: group, Ratio: normalized, UpdatedBy: actorId, UpdatedAt: now,
 	}).Error
+	if err != nil {
+		return err
+	}
+	return InvalidateResellerDefaultPricingCache()
 }
 
 // SetCustomerGroupPrice sets one customer's price for one group. An empty ratio
-// clears the override so the reseller default (or group ratio) applies again.
-func SetCustomerGroupPrice(userId int, group, ratio, source string, actorId int) error {
+// clears the override so the reseller default applies again. A reseller actor
+// (resellerScoped true) is held to the floor of its own wholesale cost and may
+// only price groups it is authorized to resell.
+func SetCustomerGroupPrice(userId int, group, ratio, source string, actorId int, resellerScoped bool) error {
 	if userId <= 0 || strings.TrimSpace(group) == "" {
 		return errors.New("invalid customer price")
 	}
@@ -122,15 +155,43 @@ func SetCustomerGroupPrice(userId int, group, ratio, source string, actorId int)
 		return err
 	}
 	if normalized == "" {
-		return DB.Where("user_id = ? AND group_name = ?", userId, group).Delete(&CustomerGroupPrice{}).Error
+		err = DB.Where("user_id = ? AND group_name = ?", userId, group).Delete(&CustomerGroupPrice{}).Error
+		if err != nil {
+			return err
+		}
+		return InvalidateResellerPricingCache(userId)
+	}
+	if resellerScoped {
+		owner, err := GetResellerCustomerOwner(userId)
+		if err != nil {
+			return err
+		}
+		if owner <= 0 || owner != actorId {
+			return ErrResellerCustomerNotFound
+		}
+		costRatio, err := resellerCostRatio(DB, owner, group)
+		if err != nil {
+			return err
+		}
+		if costRatio <= 0 {
+			return ErrResellerGroupNotAllowed
+		}
+		price, _ := parsePositiveRatio(normalized)
+		if price < costRatio {
+			return ErrResellerPriceBelowCost
+		}
 	}
 	now := common.GetTimestamp()
-	return DB.Clauses(clause.OnConflict{
+	err = DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "group_name"}},
 		DoUpdates: clause.AssignmentColumns([]string{"ratio", "source", "updated_by", "updated_at"}),
 	}).Create(&CustomerGroupPrice{
 		UserId: userId, GroupName: group, Ratio: normalized, Source: source, UpdatedBy: actorId, UpdatedAt: now,
 	}).Error
+	if err != nil {
+		return err
+	}
+	return InvalidateResellerPricingCache(userId)
 }
 
 // ListCustomerGroupPrices returns every per-group price override for one user.
