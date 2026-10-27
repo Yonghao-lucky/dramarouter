@@ -1168,6 +1168,84 @@ export function DetailsDialog(props: DetailsDialogProps) {
               requestRules={other.request_rules}
               hideCacheColumns={!hasAnyCacheTokens(other)}
             />
+            <DetailRow
+              label={t('Billing expression')}
+              value={
+                <span className='flex items-start gap-1'>
+                  <code className='bg-muted/60 min-w-0 rounded px-1.5 py-0.5 font-mono text-[11px] break-all'>
+                    {decodeBillingExprB64(other.expr_b64)}
+                  </code>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-5 w-5 shrink-0 p-0'
+                    onClick={() =>
+                      copyToClipboard(decodeBillingExprB64(other.expr_b64))
+                    }
+                    title={t('Copy to clipboard')}
+                    aria-label={t('Copy to clipboard')}
+                  >
+                    {copiedText === decodeBillingExprB64(other.expr_b64) ? (
+                      <Check className='size-3 text-green-600' />
+                    ) : (
+                      <Copy className='size-3' />
+                    )}
+                  </Button>
+                </span>
+              }
+            />
+            {other.usage_facts && (
+              <DetailRow
+                label={t('Billed usage')}
+                value={
+                  <span className='font-mono text-[11px]'>
+                    {Object.entries(other.usage_facts)
+                      .map(([key, value]) => `${key}: ${value}`)
+                      .join(', ')}
+                  </span>
+                }
+              />
+            )}
+          </DetailSection>
+        )}
+
+        {/* Async task linkage: the id the customer can poll themselves */}
+        {isConsume && other?.task_id && (
+          <DetailSection label={t('Task Information')}>
+            <DetailRow
+              label={t('Task ID')}
+              value={
+                <span className='flex items-center gap-1'>
+                  <code className='bg-muted/60 rounded px-1.5 py-0.5 font-mono text-[11px]'>
+                    {other.task_id}
+                  </code>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-5 w-5 shrink-0 p-0'
+                    onClick={() => copyToClipboard(other.task_id || '')}
+                    title={t('Copy to clipboard')}
+                    aria-label={t('Copy to clipboard')}
+                  >
+                    {copiedText === other.task_id ? (
+                      <Check className='size-3 text-green-600' />
+                    ) : (
+                      <Copy className='size-3' />
+                    )}
+                  </Button>
+                </span>
+              }
+            />
+            {other.request_path && (
+              <DetailRow
+                label={t('Query path')}
+                value={
+                  <code className='bg-muted/60 rounded px-1.5 py-0.5 font-mono text-[11px]'>
+                    {`GET ${other.request_path.replace(/\/video_generation$/, '/query/video_generation')}/${other.task_id}`}
+                  </code>
+                }
+              />
+            )}
           </DetailSection>
         )}
 

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Braces, Download, History, Info } from 'lucide-react'
+import { Braces, Download, ExternalLink, History, Info } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -186,20 +186,32 @@ export function TaskLogDetailsCell({
   return (
     <div className='flex max-w-[220px] flex-col items-start gap-1'>
       {canDownloadVideo ? (
-        <Button
-          type='button'
-          variant='ghost'
-          size='xs'
-          disabled={videoDownloading}
-          onClick={handleVideoDownload}
-        >
-          {videoDownloading ? (
-            <Spinner data-icon='inline-start' />
-          ) : (
-            <Download data-icon='inline-start' />
-          )}
-          {videoDownloading ? t('Downloading...') : t('Download video')}
-        </Button>
+        <>
+          <a
+            href={log.result_url}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='group flex max-w-full items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400'
+            title={log.result_url}
+          >
+            <ExternalLink data-icon='inline-start' />
+            <span className='truncate'>{t('Open video')}</span>
+          </a>
+          <Button
+            type='button'
+            variant='ghost'
+            size='xs'
+            disabled={videoDownloading}
+            onClick={handleVideoDownload}
+          >
+            {videoDownloading ? (
+              <Spinner data-icon='inline-start' />
+            ) : (
+              <Download data-icon='inline-start' />
+            )}
+            {videoDownloading ? t('Downloading...') : t('Download video')}
+          </Button>
+        </>
       ) : null}
       {isAdmin && log.request_body_available ? (
         <Button

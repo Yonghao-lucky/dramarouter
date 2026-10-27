@@ -205,6 +205,8 @@ export interface LogOtherData {
   expr_b64?: string
   matched_tier?: string
   request_rules?: RequestRuleTrace[]
+  /** Usage vector the task-plugin billing expression was evaluated on. */
+  usage_facts?: Record<string, string | number | boolean>
   reasoning_effort?: string
   image?: boolean
   image_ratio?: number

@@ -774,7 +774,11 @@ type ApiCategory = 'reasoning' | 'embedding' | 'image' | 'video' | 'chat'
 function apiCategoryOf(model: PricingModel): ApiCategory {
   // A model that declares the video endpoint is a video model whatever its name
   // looks like; the name heuristics below only fill in when no endpoint is set.
-  if ((model.supported_endpoint_types ?? []).includes('openai-video')) {
+  if (
+    (model.supported_endpoint_types ?? []).some(
+      (endpoint) => endpoint === 'openai-video' || endpoint === 'minimax-video'
+    )
+  ) {
     return 'video'
   }
   const profile = PROFILE_BY_NAME(model.model_name)

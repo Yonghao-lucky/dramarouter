@@ -137,7 +137,7 @@ func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCusto
 		// shows a chat-completions sample for a video model.
 		if generation := jsplugin.DefaultRegistry.Generation(); generation != nil {
 			if plugin, ok := generation.GetByModel(ability.Model); ok && plugin != nil {
-				if endpoints := taskPluginEndpointTypes(plugin.Meta.Protocols); len(endpoints) > 0 {
+				if endpoints := taskPluginEndpointTypes(plugin.Meta.Protocols, plugin.Meta.Routes); len(endpoints) > 0 {
 					return endpoints
 				}
 			}
@@ -154,8 +154,11 @@ func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCusto
 }
 
 // taskPluginEndpointTypes maps the protocols a plugin claims onto the endpoint
-// types the pricing page knows how to render.
-func taskPluginEndpointTypes(protocols []jsplugin.ProtocolClaim) []constant.EndpointType {
+// types the pricing page knows how to render. Native routes a plugin declares
+// (currently the MiniMax /v2 video contract) are surfaces of their own: they
+// carry a different request body and polling path than the OpenAI video API,
+// so they are reported separately instead of collapsing into openai-video.
+func taskPluginEndpointTypes(protocols []jsplugin.ProtocolClaim, routes []jsplugin.Route) []constant.EndpointType {
 	endpoints := make([]constant.EndpointType, 0, len(protocols))
 	for _, claim := range protocols {
 		var endpoint constant.EndpointType
@@ -169,6 +172,14 @@ func taskPluginEndpointTypes(protocols []jsplugin.ProtocolClaim) []constant.Endp
 		}
 		if !slices.Contains(endpoints, endpoint) {
 			endpoints = append(endpoints, endpoint)
+		}
+	}
+	for _, route := range routes {
+		if route.Type != jsplugin.RouteTypeSubmit || route.Path != "/v2/video_generation" {
+			continue
+		}
+		if !slices.Contains(endpoints, constant.EndpointTypeMiniMaxVideo) {
+			endpoints = append(endpoints, constant.EndpointTypeMiniMaxVideo)
 		}
 	}
 	return endpoints

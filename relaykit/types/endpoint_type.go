@@ -16,6 +16,11 @@ const (
 	EndpointTypeImageGeneration       EndpointType = "image-generation"
 	EndpointTypeEmbeddings            EndpointType = "embeddings"
 	EndpointTypeOpenAIVideo           EndpointType = "openai-video"
+	// EndpointTypeMiniMaxVideo is the provider-native video contract
+	// (POST /v2/video_generation, GET /v2/query/video_generation/{id}).
+	// It is a distinct surface from the OpenAI video API: different body
+	// shape, different polling route.
+	EndpointTypeMiniMaxVideo EndpointType = "minimax-video"
 )
 
 // Finish reasons shared by the OpenAI-compatible response formats.

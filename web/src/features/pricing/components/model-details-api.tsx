@@ -81,6 +81,13 @@ const LANG_HIGHLIGHT: Record<Lang, BundledLanguage> = {
   javascript: 'javascript',
 }
 
+// The raw endpoint type is an internal key ("openai-video"). Customers know
+// these surfaces by protocol name, so the tab shows the protocol and its path.
+const ENDPOINT_SAMPLE_LABELS: Record<string, string> = {
+  'openai-response': 'Responses',
+  'openai-video': 'Video',
+}
+
 type SampleContext = {
   baseUrl: string
   apiKeyEnv: string
@@ -613,7 +620,7 @@ function CodeSamplesSection(props: {
                   value={ep.type}
                   className='h-7 px-2.5 text-xs'
                 >
-                  {ep.type}
+                  {ENDPOINT_SAMPLE_LABELS[ep.type] ?? ep.type}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -1116,8 +1123,13 @@ export function ModelDetailsApi(props: {
 
   return (
     <div className='space-y-6'>
+      {videoUsageDoc(props.model.model_name || '') ? null : (
+        <CodeSamplesSection
+          model={props.model}
+          endpointMap={props.endpointMap}
+        />
+      )}
       <VideoApiDocsSection model={props.model} baseUrl={baseUrl} />
-      <CodeSamplesSection model={props.model} endpointMap={props.endpointMap} />
       <UsageParametersSection model={props.model} />
       <AuthSection />
       <SupportedParametersSection model={props.model} />
