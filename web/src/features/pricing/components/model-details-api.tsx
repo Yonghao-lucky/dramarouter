@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Gauge,
   KeyRound,
+  Route,
   ScrollText,
   Sigma,
   Zap,
@@ -47,7 +48,12 @@ import {
   type SupportedParameter,
 } from '../lib/mock-stats'
 import { replaceModelInPath } from '../lib/model-helpers'
-import { videoUsageDoc } from '../lib/video-usage-docs'
+import {
+  buildVideoApiSample,
+  videoUsageDoc,
+  type VideoApiOperationId,
+  type VideoSampleLang,
+} from '../lib/video-usage-docs'
 import type { PricingModel } from '../types'
 
 // ---------------------------------------------------------------------------
@@ -822,6 +828,155 @@ function RateLimitsSection(props: { model: PricingModel }) {
 // Authentication preview
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Video endpoints + usage docs
+// ---------------------------------------------------------------------------
+
+const VIDEO_SAMPLE_LANGS: VideoSampleLang[] = [
+  'curl',
+  'python',
+  'typescript',
+]
+
+// Video models expose several protocols at once, so a single sample cannot
+// teach the contract: every operation (create, poll) for every protocol gets
+// its own tab, rendered from the model's own route table.
+function VideoApiDocsSection(props: {
+  model: PricingModel
+  baseUrl: string
+}) {
+  const { t } = useTranslation()
+  const doc = useMemo(
+    () => videoUsageDoc(props.model.model_name || ''),
+    [props.model.model_name]
+  )
+  const [operation, setOperation] = useState<VideoApiOperationId>(
+    doc?.endpoints[0]?.id ?? 'minimax-create'
+  )
+  const [lang, setLang] = useState<VideoSampleLang>('curl')
+
+  if (!doc) return null
+
+  const active =
+    doc.endpoints.find((endpoint) => endpoint.id === operation) ??
+    doc.endpoints[0]
+
+  return (
+    <>
+      <section>
+        <SectionTitle icon={Route}>{t('Endpoints')}</SectionTitle>
+        <StaticDataTable
+          className={tableStyles.sectionContainer}
+          headerRowClassName={tableStyles.mutedHeaderRow}
+          data={doc.endpoints}
+          getRowKey={(endpoint) => endpoint.id}
+          getRowClassName={() => 'hover:bg-muted/20'}
+          columns={[
+            {
+              id: 'method',
+              header: t('Method'),
+              className: 'h-9 w-20',
+              cellClassName: tableStyles.topCell,
+              cell: (endpoint) => (
+                <Badge
+                  variant={endpoint.method === 'POST' ? 'default' : 'secondary'}
+                  className='h-6 rounded px-2 font-mono text-[11px] font-medium'
+                >
+                  {endpoint.method}
+                </Badge>
+              ),
+            },
+            {
+              id: 'path',
+              header: t('Path'),
+              className: 'h-9 w-64',
+              cellClassName: tableStyles.topCell,
+              cell: (endpoint) => (
+                <code className='font-mono text-sm'>{endpoint.path}</code>
+              ),
+            },
+            {
+              id: 'protocol',
+              header: t('Protocol'),
+              className: 'h-9 w-32',
+              cellClassName: 'py-2 text-muted-foreground text-sm',
+              cell: (endpoint) => endpoint.protocol,
+            },
+            {
+              id: 'summary',
+              header: t('Description'),
+              className: 'h-9',
+              cellClassName: tableStyles.topMutedCell,
+              cell: (endpoint) => t(endpoint.summary),
+            },
+          ]}
+        />
+      </section>
+
+      <section>
+        <SectionTitle icon={ScrollText}>{t('Request example')}</SectionTitle>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Tabs
+            value={operation}
+            onValueChange={(value) =>
+              setOperation(value as VideoApiOperationId)
+            }
+          >
+            <TabsList className='bg-muted/40 h-8 flex-wrap p-0.5'>
+              {doc.endpoints.map((endpoint) => (
+                <TabsTrigger
+                  key={endpoint.id}
+                  value={endpoint.id}
+                  className='h-7 px-2.5 text-xs'
+                >
+                  {endpoint.method} {endpoint.path.split('/').pop()}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <Tabs
+            value={lang}
+            onValueChange={(value) => setLang(value as VideoSampleLang)}
+            className='ml-auto'
+          >
+            <TabsList className='bg-muted/40 h-8 p-0.5'>
+              {VIDEO_SAMPLE_LANGS.map((value) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className='h-7 px-2.5 text-xs'
+                >
+                  {LANG_LABELS[value]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
+        <div className='mt-3'>
+          <CodeBlock
+            code={buildVideoApiSample(active.id, lang, {
+              baseUrl: props.baseUrl,
+              apiKeyEnv: 'NEW_API_KEY',
+              modelName: props.model.model_name || '',
+            })}
+            language={LANG_HIGHLIGHT[lang]}
+          >
+            <CodeBlockCopyButton />
+          </CodeBlock>
+        </div>
+        <p className='text-muted-foreground mt-2 text-xs'>
+          {t('Full URL')}{' '}
+          <code className='bg-muted rounded px-1 py-0.5 font-mono text-[11px]'>
+            {props.baseUrl}
+            {active.path}
+          </code>{' '}
+          {t('· replace placeholders with the ids from the create response.')}
+        </p>
+      </section>
+    </>
+  )
+}
+
 // Video models bill on dimensions the plugin declares, so the parameter table
 // comes from the model's own request contract rather than the generic
 // chat/fps template that does not apply to them.
@@ -945,8 +1100,23 @@ export function ModelDetailsApi(props: {
   model: PricingModel
   endpointMap: Record<string, { path?: string; method?: string }>
 }) {
+  const { status } = useStatus()
+  const baseUrl = useMemo(() => {
+    const candidate =
+      (status as Record<string, unknown> | null)?.server_address ??
+      (status as Record<string, unknown> | null)?.serverAddress ??
+      (status?.data as Record<string, unknown> | undefined)?.server_address ??
+      (status?.data as Record<string, unknown> | undefined)?.serverAddress
+    if (candidate && typeof candidate === 'string') {
+      return candidate.replace(/\/$/, '')
+    }
+    if (typeof window !== 'undefined') return window.location.origin
+    return 'https://api.example.com'
+  }, [status])
+
   return (
     <div className='space-y-6'>
+      <VideoApiDocsSection model={props.model} baseUrl={baseUrl} />
       <CodeSamplesSection model={props.model} endpointMap={props.endpointMap} />
       <UsageParametersSection model={props.model} />
       <AuthSection />

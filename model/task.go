@@ -215,6 +215,22 @@ func (t *Task) GetUpstreamTaskID() string {
 	return t.TaskID
 }
 
+// GetQueryModelName 获取轮询时用于选择上游查询路径的模型名。
+// 插件按模型决定查询路由（MiniMax /v2 用路径参数、/v1 用查询串），
+// 优先取提交时记录的上游模型名，回退到用户请求的模型名。
+func (t *Task) GetQueryModelName() string {
+	if t.Properties.UpstreamModelName != "" {
+		return t.Properties.UpstreamModelName
+	}
+	if t.Properties.OriginModelName != "" {
+		return t.Properties.OriginModelName
+	}
+	if bc := t.PrivateData.BillingContext; bc != nil {
+		return bc.OriginModelName
+	}
+	return ""
+}
+
 // GetResultURL 获取任务结果 URL（视频地址等）
 // 新数据存在 PrivateData.ResultURL 中；旧数据回退到 FailReason（历史兼容）
 func (t *Task) GetResultURL() string {

@@ -472,6 +472,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  constant.NormalizeTaskAction(task.Action),
+		"model":   task.GetQueryModelName(),
 	}, proxy)
 	if err != nil {
 		pollError = err.Error()

@@ -49,6 +49,9 @@ function unitSuffix(unit: string, t: (key: string) => string): string {
 export function ModelTaskUsagePricingSection(props: {
   schema?: BillingUsageSchema
   billingExpr?: string
+  groupRatio?: Record<string, number>
+  usableGroup?: Record<string, { desc: string; ratio: number }>
+  groups?: string[]
 }) {
   const { t, i18n } = useTranslation()
   const schema = props.schema
@@ -75,6 +78,11 @@ export function ModelTaskUsagePricingSection(props: {
     )
   )
   if (!priced) return null
+
+  const groups = (props.groups || []).map((name) => ({
+    name,
+    ratio: props.groupRatio?.[name] ?? 1,
+  }))
 
   return (
     <section>
@@ -112,6 +120,7 @@ export function ModelTaskUsagePricingSection(props: {
                   const row = draft[value]?.[field.key]
                   const price = row?.price || ''
                   const free = Number(row?.free || 0)
+                  const unitPrice = Number(price)
                   return (
                     <td
                       key={field.key}
@@ -124,6 +133,17 @@ export function ModelTaskUsagePricingSection(props: {
                           ? ` · ${t('first {{count}} free', { count: free })}`
                           : ''}
                       </div>
+                      {groups.length > 0 &&
+                        unitPrice > 0 &&
+                        groups.map((group) => (
+                          <div
+                            key={group.name}
+                            className='text-muted-foreground/60 mt-0.5 text-[11px]'
+                          >
+                            {group.name} {group.ratio}x:{' '}
+                            {formatUnitPrice(String(unitPrice * group.ratio))}
+                          </div>
+                        ))}
                     </td>
                   )
                 })}

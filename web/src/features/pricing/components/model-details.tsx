@@ -1148,6 +1148,12 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
     props.model.billing_mode === 'tiered_expr' &&
     Boolean(props.model.billing_expr)
 
+  // Task models (video/audio) bill on per-second and per-count units, not on
+  // token price fields, so the token-oriented price tables below cannot expand
+  // their expression: they only render empty tier rows. The usage pricing
+  // section reads the same expression and is the accurate view.
+  const isTaskUsage = Boolean(props.model.billing_usage_schema)
+
   return (
     <div className='@container/details space-y-4'>
       <ModelHeader model={props.model} />
@@ -1174,26 +1180,34 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
 
           <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
             <SectionTitle>{t('Pricing')}</SectionTitle>
-            <PriceSection
-              model={props.model}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
-            {isDynamic && (
-              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
+            {!isTaskUsage && (
+              <>
+                <PriceSection
+                  model={props.model}
+                  priceRate={props.priceRate}
+                  usdExchangeRate={props.usdExchangeRate}
+                  tokenUnit={props.tokenUnit}
+                  showRechargePrice={showRechargePrice}
+                />
+                {isDynamic && (
+                  <DynamicPricingBreakdown
+                    billingExpr={props.model.billing_expr}
+                  />
+                )}
+              </>
             )}
-            <GroupPricingSection
-              model={props.model}
-              groupRatio={props.groupRatio}
-              usableGroup={props.usableGroup}
-              autoGroups={props.autoGroups}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
+            {!isTaskUsage && (
+              <GroupPricingSection
+                model={props.model}
+                groupRatio={props.groupRatio}
+                usableGroup={props.usableGroup}
+                autoGroups={props.autoGroups}
+                priceRate={props.priceRate}
+                usdExchangeRate={props.usdExchangeRate}
+                tokenUnit={props.tokenUnit}
+                showRechargePrice={showRechargePrice}
+              />
+            )}
             <ModelPeakPricingSection view={props.model.peak_pricing} />
             <ModelImageResolutionSection
               view={props.model.image_resolution_pricing}
@@ -1201,6 +1215,9 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
             <ModelTaskUsagePricingSection
               schema={props.model.billing_usage_schema}
               billingExpr={props.model.billing_expr}
+              groupRatio={props.groupRatio}
+              usableGroup={props.usableGroup}
+              groups={getAvailableGroups(props.model, props.usableGroup || {})}
             />
           </section>
 
