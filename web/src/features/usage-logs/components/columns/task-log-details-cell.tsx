@@ -24,7 +24,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 
-import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
+import { TASK_ACTIONS, TASK_STATUS, normalizeTaskAction } from '../../constants'
 import {
   canGetTaskInformation,
   downloadTaskVideo,
@@ -88,10 +88,18 @@ export function TaskLogDetailsCell({
   const [taskInformationLoading, setTaskInformationLoading] = useState(false)
   const [taskInformationError, setTaskInformationError] = useState(false)
 
+  const action = normalizeTaskAction(log.action)
+  // Task rows persist the canonical snake_case action, so the gate has to
+  // compare the normalized value. result_url stays blanked for successful tasks
+  // (the stored value is a signed upstream URL); the same-origin content route
+  // is the client-facing link and accepts a dashboard session.
+  const videoLink =
+    log.result_url?.trim() ||
+    `/v1/videos/${encodeURIComponent(log.task_id)}/content`
   const canDownloadVideo =
     log.status === TASK_STATUS.SUCCESS &&
-    VIDEO_ACTIONS.has(log.action) &&
-    Boolean(log.result_url?.trim())
+    VIDEO_ACTIONS.has(action) &&
+    Boolean(log.task_id)
 
   const handleRequestBody = async () => {
     setRequestBodyOpen(true)
@@ -175,7 +183,7 @@ export function TaskLogDetailsCell({
 
   const hasDetails =
     canDownloadVideo ||
-    (isAdmin && VIDEO_ACTIONS.has(log.action)) ||
+    (isAdmin && VIDEO_ACTIONS.has(action)) ||
     (isAdmin && log.request_body_available) ||
     canGetTaskInformation(log.platform) ||
     Boolean(log.fail_reason)
@@ -188,11 +196,11 @@ export function TaskLogDetailsCell({
       {canDownloadVideo ? (
         <>
           <a
-            href={log.result_url}
+            href={videoLink}
             target='_blank'
             rel='noopener noreferrer'
             className='group flex max-w-full items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400'
-            title={log.result_url}
+            title={videoLink}
           >
             <ExternalLink data-icon='inline-start' />
             <span className='truncate'>{t('Open video')}</span>
@@ -224,7 +232,7 @@ export function TaskLogDetailsCell({
           {t('View request body')}
         </Button>
       ) : null}
-      {isAdmin && VIDEO_ACTIONS.has(log.action) ? (
+      {isAdmin && VIDEO_ACTIONS.has(action) ? (
         <Button
           type='button'
           variant='ghost'
