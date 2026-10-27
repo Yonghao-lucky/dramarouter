@@ -162,11 +162,6 @@ function CustomerDetailDialog(props: {
     enabled: props.customerId != null,
   })
 
-  const authorizedGroups = groups.data ?? []
-  const customerGroupPriced = authorizedGroups.some(
-    (group) => group.group === detail.data?.group
-  )
-
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ['reseller'] })
 
@@ -181,15 +176,6 @@ function CustomerDetailDialog(props: {
         direction === 'fund' ? t('Quota transferred') : t('Quota reclaimed')
       )
       setFundAmount('')
-      void refresh()
-    },
-  })
-
-  const moveCustomer = useMutation({
-    mutationFn: (group: string) =>
-      setResellerCustomerGroup(props.customerId as number, group),
-    onSuccess: () => {
-      toast.success(t('Group updated'))
       void refresh()
     },
   })
@@ -276,29 +262,9 @@ function CustomerDetailDialog(props: {
               </div>
               <p className='text-muted-foreground mt-2 text-xs'>
                 {t(
-                  'Funding charges your wallet the wholesale cost of that quota. Reclaiming returns what is left, at the average cost you paid.'
+                  'Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, credited as the customer consumes.'
                 )}
               </p>
-              {customerGroupPriced ? null : (
-                <div className='mt-2 flex flex-wrap items-center gap-2'>
-                  <p className='text-destructive text-xs'>
-                    {t(
-                      'This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.'
-                    )}
-                  </p>
-                  {authorizedGroups.map((group) => (
-                    <Button
-                      key={group.group}
-                      size='sm'
-                      variant='outline'
-                      disabled={moveCustomer.isPending}
-                      onClick={() => moveCustomer.mutate(group.group)}
-                    >
-                      {group.group}
-                    </Button>
-                  ))}
-                </div>
-              )}
             </div>
 
             <div>

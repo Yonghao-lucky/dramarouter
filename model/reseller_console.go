@@ -196,7 +196,7 @@ func GetResellerCustomerDetail(resellerUserId, customerUserId int) (*ResellerCus
 		return nil, err
 	}
 	detail.Transfers = transfers
-	retail, _, err := resellerRemainingTransfer(DB, resellerUserId, customerUserId)
+	retail, err := resellerRemainingTransfer(DB, resellerUserId, customerUserId)
 	if err != nil {
 		return nil, err
 	}

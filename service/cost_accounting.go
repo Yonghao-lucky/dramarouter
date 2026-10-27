@@ -59,14 +59,14 @@ func buildTaskCostAccountingInput(task *model.Task, logType int, saleQuota int) 
 
 // attachResellerEvidence freezes who earns the margin on this charge. The margin
 // uses the same sign as the charge, so a refund records a negative margin and the
-// daily rollup nets out naturally. It is reporting evidence: the customer pays
-// retail from their own wallet and the reseller's wholesale cost is settled when
-// quota is transferred, so every charge is marked "transfer".
+// daily rollup nets out naturally. The customer pays retail from its own wallet
+// like any ordinary account, so the charge is marked "self" and the reseller
+// margin rollup credits the spread into the reseller wallet afterwards.
 func attachResellerEvidence(input *model.CostAccountingInput, ownerID int, retailRatio, costRatio float64, signedRetailQuota int64, effectiveRatio float64) {
 	if input == nil || ownerID <= 0 || retailRatio <= 0 || costRatio <= 0 {
 		return
 	}
-	settlement := "transfer"
+	settlement := "self"
 	ratio := effectiveRatio
 	if ratio <= 0 {
 		ratio = retailRatio

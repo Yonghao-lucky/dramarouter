@@ -3225,6 +3225,7 @@
     "Fund customer": "Fund customer",
     "Funded": "Funded",
     "Funded (retail)": "Funded (retail)",
+    "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, credited as the customer consumes.": "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, credited as the customer consumes.",
     "Future asset status events will no longer be sent to this callback address.": "Các sự kiện trạng thái tài nguyên sau này sẽ không còn được gửi đến địa chỉ này.",
     "Future events will no longer be sent to this callback address.": "Các sự kiện mới sẽ không còn được gửi đến địa chỉ gọi lại này.",
     "GC Count": "Số lần GC",

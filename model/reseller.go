@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -246,77 +245,34 @@ func requireResellerCustomer(tx *gorm.DB, resellerUserId, customerUserId int) (*
 	return &customer, nil
 }
 
-// resellerGroupRatios returns the wholesale and retail ratios a reseller sells
-// one group at. The retail ratio falls back to the wholesale ratio itself when
-// the reseller never set a standing price, so a transfer is always priced and
-// the reseller can never sell below cost by omission.
-func resellerGroupRatios(tx *gorm.DB, resellerUserId, customerUserId int, group string) (costRatio, retailRatio float64, err error) {
-	var cost ResellerGroupCost
-	err = tx.Where("reseller_id = ? AND group_name = ? AND enabled = ?", resellerUserId, group, true).First(&cost).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, 0, ErrResellerGroupNotAllowed
-	}
-	if err != nil {
-		return 0, 0, err
-	}
-	costRatio, ok := parsePositiveRatio(cost.CostRatio)
-	if !ok {
-		return 0, 0, ErrResellerGroupNotAllowed
-	}
-
-	var customerPrice CustomerGroupPrice
-	err = tx.Where("user_id = ? AND group_name = ?", customerUserId, group).First(&customerPrice).Error
-	if err == nil {
-		if ratio, valid := parsePositiveRatio(customerPrice.Ratio); valid {
-			return costRatio, ratio, nil
-		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, 0, err
-	}
-
-	var defaultPrice ResellerDefaultPrice
-	err = tx.Where("reseller_id = ? AND group_name = ?", resellerUserId, group).First(&defaultPrice).Error
-	if err == nil {
-		if ratio, valid := parsePositiveRatio(defaultPrice.Ratio); valid {
-			return costRatio, ratio, nil
-		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, 0, err
-	}
-	return costRatio, costRatio, nil
-}
-
-// resellerRemainingTransfer sums the unconsumed transfer position of a customer
-// with one reseller. The average paid cost per retail quota is the only safe
-// reclaim basis, because ratios may change between transfers.
-func resellerRemainingTransfer(tx *gorm.DB, resellerUserId, customerUserId int) (retail int64, cost int64, err error) {
+// resellerRemainingTransfer sums the unconsumed funded position of a customer
+// with one reseller. Transfers are 1:1, so the retail position is also the
+// amount the reseller paid.
+func resellerRemainingTransfer(tx *gorm.DB, resellerUserId, customerUserId int) (int64, error) {
 	var row struct {
 		Retail int64 `gorm:"column:retail"`
-		Cost   int64 `gorm:"column:cost"`
 	}
-	err = tx.Model(&ResellerTransfer{}).
+	err := tx.Model(&ResellerTransfer{}).
 		Where("reseller_id = ? AND customer_user_id = ?", resellerUserId, customerUserId).
-		Select("COALESCE(SUM(CASE WHEN direction = 'fund' THEN retail_quota ELSE -retail_quota END),0) AS retail, COALESCE(SUM(CASE WHEN direction = 'fund' THEN cost_quota ELSE -cost_quota END),0) AS cost").
+		Select("COALESCE(SUM(CASE WHEN direction = 'fund' THEN retail_quota ELSE -retail_quota END),0) AS retail").
 		Scan(&row).Error
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	return row.Retail, row.Cost, nil
+	return row.Retail, nil
 }
 
 // TransferResellerQuota moves quota between the reseller wallet and one owned
 // customer wallet atomically. direction is "fund" or "reclaim". The event key is
 // caller-owned so a retried request never moves money twice.
 //
-// A fund of X retail quota charges the reseller X·cost/retail: the platform is
-// paid its wholesale price at transfer time, and the reseller's margin becomes
-// real immediately. A reclaim reverses the exchange at the average cost the
-// outstanding position was bought at, so ratio changes cannot be arbitraged.
-//
-// Both ratios come from the customer's own group. A customer consumes at the
-// ratio of the group they belong to, so pricing a transfer at any other group
-// would let the reseller pay one cost while the customer spends at another —
-// a silent loss whenever the two differ.
+// The transfer itself is 1:1: funding X quota costs the reseller X and credits
+// the customer X, and a reclaim reverses exactly that. A customer is an ordinary
+// account that may call any group its key selects, so charging a wholesale rate
+// here would require guessing which group the quota will be spent in. The
+// reseller's profit is instead the spread between the retail price it set and
+// its own wholesale cost for the group actually used, which the billing path
+// records per request and the margin rollup credits back to the reseller wallet.
 func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direction string, retailQuota int64, eventKey, remark string) (*ResellerTransfer, error) {
 	if resellerUserId <= 0 || customerUserId <= 0 || retailQuota <= 0 || eventKey == "" {
 		return nil, ErrResellerTransferInvalid
@@ -340,11 +296,9 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 		if err != nil {
 			return err
 		}
+		// Recorded for display only: the transfer is priced 1:1 regardless of
+		// which group the customer happens to sit in or spends in.
 		group := customer.Group
-		costRatio, retailRatio, err := resellerGroupRatios(tx, resellerUserId, customerUserId, group)
-		if err != nil {
-			return err
-		}
 
 		// Lock both wallets in a stable id order so two concurrent transfers in
 		// opposite directions cannot deadlock.
@@ -367,19 +321,16 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 		var resellerDelta, customerDelta, costQuota int64
 		switch direction {
 		case ResellerTransferFund:
-			costQuota = int64(common.QuotaRound(float64(retailQuota) * costRatio / retailRatio))
-			if costQuota < 0 {
-				return ErrResellerTransferInvalid
-			}
-			if int64(reseller.Quota) < costQuota {
+			if int64(reseller.Quota) < retailQuota {
 				return ErrResellerWalletShort
 			}
-			resellerDelta, customerDelta = -costQuota, retailQuota
+			costQuota = retailQuota
+			resellerDelta, customerDelta = -retailQuota, retailQuota
 		case ResellerTransferReclaim:
 			// The outstanding funded position is checked first: reclaiming more
 			// than the reseller ever put in is a different error from the
 			// customer having already spent the quota.
-			remainingRetail, remainingCost, err := resellerRemainingTransfer(tx, resellerUserId, customerUserId)
+			remainingRetail, err := resellerRemainingTransfer(tx, resellerUserId, customerUserId)
 			if err != nil {
 				return err
 			}
@@ -389,10 +340,8 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 			if int64(owner.Quota) < retailQuota {
 				return ErrResellerCustomerShort
 			}
-			if remainingRetail > 0 && remainingCost > 0 {
-				costQuota = int64(float64(remainingCost) * float64(retailQuota) / float64(remainingRetail))
-			}
-			resellerDelta, customerDelta = costQuota, -retailQuota
+			costQuota = retailQuota
+			resellerDelta, customerDelta = retailQuota, -retailQuota
 		default:
 			return ErrResellerTransferInvalid
 		}
@@ -430,8 +379,8 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 			GroupName:      group,
 			RetailQuota:    retailQuota,
 			CostQuota:      costQuota,
-			RetailRatio:    strconv.FormatFloat(retailRatio, 'f', -1, 64),
-			CostRatio:      strconv.FormatFloat(costRatio, 'f', -1, 64),
+			RetailRatio:    "1",
+			CostRatio:      "1",
 			OperatorId:     operatorId,
 			Remark:         remark,
 			CreatedAt:      common.GetTimestamp(),
@@ -450,7 +399,7 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 // ResellerReclaimableQuota is the retail quota a customer can hand back without
 // dipping into quota funded outside the reseller relationship.
 func ResellerReclaimableQuota(resellerUserId, customerUserId int) (int64, error) {
-	retail, _, err := resellerRemainingTransfer(DB, resellerUserId, customerUserId)
+	retail, err := resellerRemainingTransfer(DB, resellerUserId, customerUserId)
 	if err != nil {
 		return 0, err
 	}

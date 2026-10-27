@@ -3225,6 +3225,7 @@
     "Fund customer": "給客戶充值",
     "Funded": "已充值",
     "Funded (retail)": "已充值（零售）",
+    "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, credited as the customer consumes.": "充值按 1:1 從你的錢包劃入客戶錢包。你的利潤來自零售價與批發價的差額，隨客戶消費結算返還。",
     "Future asset status events will no longer be sent to this callback address.": "後續素材狀態事件將不再傳送到此回呼位址。",
     "Future events will no longer be sent to this callback address.": "後續事件將不再推送至此回呼位址。",
     "GC Count": "GC 次數",

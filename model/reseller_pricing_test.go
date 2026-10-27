@@ -69,8 +69,9 @@ func TestResellerMarginQuotaArithmetic(t *testing.T) {
 }
 
 // TestResellerTransferMarginsAndReclaim pins the single-wallet contract: a fund
-// credits the customer retail quota and charges the reseller the wholesale
-// amount, and a reclaim returns the average cost actually paid.
+// moves quota 1:1 between the two wallets and a reclaim moves it back. The
+// reseller's profit is not taken here — the customer pays retail like any normal
+// account and the spread is credited from the billing records afterwards.
 func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	truncateTables(t)
 
@@ -85,16 +86,16 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.8", Enabled: true}).Error)
 	require.NoError(t, DB.Create(&ResellerDefaultPrice{ResellerId: resellerID, GroupName: "vip", Ratio: "1.0"}).Error)
 
-	// 10000 retail at cost 0.8 / retail 1.0 costs the reseller 8000.
+	// Funding 10000 moves 10000 from the reseller and credits the customer 10000.
+	// The customer's group and the wholesale table play no part in the amount.
 	transfer, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 10000, "evt-fund-1", "seed")
 	require.NoError(t, err)
-	assert.Equal(t, int64(8000), transfer.CostQuota)
-	assert.Equal(t, "1", transfer.RetailRatio)
-	assert.Equal(t, "0.8", transfer.CostRatio)
+	assert.Equal(t, int64(10000), transfer.CostQuota)
+	assert.Equal(t, int64(10000), transfer.RetailQuota)
 
 	resellerQuota, err := GetUserQuota(resellerID, true)
 	require.NoError(t, err)
-	assert.Equal(t, 100000-8000, resellerQuota)
+	assert.Equal(t, 100000-10000, resellerQuota)
 	customerQuota, err := GetUserQuota(customerID, true)
 	require.NoError(t, err)
 	assert.Equal(t, 10000, customerQuota)
@@ -105,15 +106,15 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	assert.Equal(t, transfer.Id, again.Id)
 	resellerQuota, err = GetUserQuota(resellerID, true)
 	require.NoError(t, err)
-	assert.Equal(t, 100000-8000, resellerQuota)
+	assert.Equal(t, 100000-10000, resellerQuota)
 
-	// Reclaim 4000 returns the average paid cost, not the money originally paid.
+	// Reclaiming returns exactly what was moved back.
 	reclaim, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, 4000, "evt-reclaim-1", "unused")
 	require.NoError(t, err)
-	assert.Equal(t, int64(3200), reclaim.CostQuota)
+	assert.Equal(t, int64(4000), reclaim.CostQuota)
 	resellerQuota, err = GetUserQuota(resellerID, true)
 	require.NoError(t, err)
-	assert.Equal(t, 100000-8000+3200, resellerQuota)
+	assert.Equal(t, 100000-10000+4000, resellerQuota)
 	customerQuota, err = GetUserQuota(customerID, true)
 	require.NoError(t, err)
 	assert.Equal(t, 6000, customerQuota)
@@ -152,10 +153,11 @@ func TestResellerTransferGuards(t *testing.T) {
 	_, err := TransferResellerQuota(resellerID, otherID, resellerID, ResellerTransferFund, 1000, "evt-guard-own", "")
 	assert.ErrorIs(t, err, ErrResellerCustomerNotFound, "an unowned customer must never be funded")
 
-	// Pricing follows the customer's own group, so a customer in a group with no
-	// wholesale row is refused instead of being funded at some other group's cost.
-	_, err = TransferResellerQuota(resellerID, ungroupedID, resellerID, ResellerTransferFund, 1000, "evt-guard-group", "")
-	assert.ErrorIs(t, err, ErrResellerGroupNotAllowed, "the customer's own group must be in the price book")
+	// A customer is an ordinary account: funding works no matter which group it
+	// sits in, because the transfer is 1:1 and does not price the request.
+	funded, err := TransferResellerQuota(resellerID, ungroupedID, resellerID, ResellerTransferFund, 50, "evt-guard-group", "")
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), funded.CostQuota)
 
 	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 1000, "evt-guard-wallet", "")
 	assert.ErrorIs(t, err, ErrResellerWalletShort, "the reseller must prepay the wholesale amount")
