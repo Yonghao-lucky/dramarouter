@@ -312,7 +312,12 @@ func resellerRemainingTransfer(tx *gorm.DB, resellerUserId, customerUserId int) 
 // paid its wholesale price at transfer time, and the reseller's margin becomes
 // real immediately. A reclaim reverses the exchange at the average cost the
 // outstanding position was bought at, so ratio changes cannot be arbitraged.
-func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direction, group string, retailQuota int64, eventKey, remark string) (*ResellerTransfer, error) {
+//
+// Both ratios come from the customer's own group. A customer consumes at the
+// ratio of the group they belong to, so pricing a transfer at any other group
+// would let the reseller pay one cost while the customer spends at another —
+// a silent loss whenever the two differ.
+func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direction string, retailQuota int64, eventKey, remark string) (*ResellerTransfer, error) {
 	if resellerUserId <= 0 || customerUserId <= 0 || retailQuota <= 0 || eventKey == "" {
 		return nil, ErrResellerTransferInvalid
 	}
@@ -335,9 +340,7 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 		if err != nil {
 			return err
 		}
-		if group == "" {
-			group = customer.Group
-		}
+		group := customer.Group
 		costRatio, retailRatio, err := resellerGroupRatios(tx, resellerUserId, customerUserId, group)
 		if err != nil {
 			return err

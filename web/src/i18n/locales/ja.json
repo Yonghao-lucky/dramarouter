@@ -7350,6 +7350,7 @@
     "This combination will be billed as free.": "この組み合わせの料金は発生しません。",
     "This confirmation unlocks payment, redemption code, subscription plan, and invitation reward features. Please read the statements carefully.": "この確認により、支払い、引換コード、サブスクリプションプラン、招待報酬の機能が解除されます。各項目をよく読んでください。",
     "This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.": "これはモデルリクエストのレート制限を制御します。Web/API ルートのスロットリングは環境変数で設定され、引き続き 429 を返す場合があります。",
+    "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.": "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.",
     "This data may be unreliable, use with caution": "このデータは信頼できない可能性があります。注意して使用してください",
     "This date is outside the formal accounting period.": "この日付は正式な記帳期間の対象外です。",
     "This device does not support Passkey": "このデバイスはPasskeyをサポートしていません",

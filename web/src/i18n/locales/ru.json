@@ -7350,6 +7350,7 @@
     "This combination will be billed as free.": "Эта комбинация будет тарифицироваться бесплатно.",
     "This confirmation unlocks payment, redemption code, subscription plan, and invitation reward features. Please read the statements carefully.": "Это подтверждение разблокирует функции платежей, кодов пополнения, планов подписки и наград за приглашения. Внимательно прочитайте заявления.",
     "This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.": "Этот параметр управляет ограничением частоты запросов к моделям. Ограничение маршрутов Web/API настраивается переменными окружения и всё ещё может возвращать 429.",
+    "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.": "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.",
     "This data may be unreliable, use with caution": "Эти данные могут быть ненадежными, используйте с осторожностью",
     "This date is outside the formal accounting period.": "Эта дата не входит в период официального учета.",
     "This device does not support Passkey": "Это устройство не поддерживает Passkey",

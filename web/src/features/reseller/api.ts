@@ -179,7 +179,9 @@ export async function transferResellerQuota(
   customerId: number,
   payload: {
     direction: 'fund' | 'reclaim'
-    group?: string
+    // Pricing always follows the customer's own group on the server; the
+    // payload deliberately carries no group so a reseller cannot bill one
+    // group's cost while the customer consumes at another.
     retail_quota: number
     remark?: string
     event_key?: string

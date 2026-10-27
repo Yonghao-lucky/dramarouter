@@ -7350,6 +7350,7 @@
     "This combination will be billed as free.": "Tổ hợp này sẽ không phát sinh phí.",
     "This confirmation unlocks payment, redemption code, subscription plan, and invitation reward features. Please read the statements carefully.": "Xác nhận này mở khóa các tính năng thanh toán, mã đổi thưởng, gói đăng ký và phần thưởng mời. Vui lòng đọc kỹ các tuyên bố.",
     "This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.": "Thiết lập này kiểm soát giới hạn tốc độ yêu cầu mô hình. Giới hạn tuyến Web/API được cấu hình bằng biến môi trường và vẫn có thể trả về 429.",
+    "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.": "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.",
     "This data may be unreliable, use with caution": "Dữ liệu này có thể không đáng tin cậy, sử dụng thận trọng",
     "This date is outside the formal accounting period.": "Ngày này nằm ngoài kỳ ghi sổ chính thức.",
     "This device does not support Passkey": "Thiết bị này không hỗ trợ Passkey",

@@ -35,7 +35,7 @@ func resellerErrorMessage(err error) string {
 	case errors.Is(err, model.ErrResellerCustomerNotFound):
 		return "customer is not owned by this reseller"
 	case errors.Is(err, model.ErrResellerGroupNotAllowed):
-		return "group is not authorized for this reseller"
+		return "this customer's group is not in your price book; move the customer to one of your groups first"
 	case errors.Is(err, model.ErrResellerPriceBelowCost):
 		return "price cannot be lower than the reseller cost"
 	case errors.Is(err, model.ErrResellerWalletShort):
@@ -250,7 +250,7 @@ func AdminTransferResellerQuota(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid transfer request")
 		return
 	}
-	transfer, err := model.TransferResellerQuota(req.ResellerId, req.CustomerUserId, c.GetInt("id"), req.Direction, req.Group, req.RetailQuota, req.EventKey, req.Remark)
+	transfer, err := model.TransferResellerQuota(req.ResellerId, req.CustomerUserId, c.GetInt("id"), req.Direction, req.RetailQuota, req.EventKey, req.Remark)
 	if err != nil {
 		writeResellerError(c, err)
 		return
@@ -266,7 +266,6 @@ type transferRequest struct {
 	ResellerId     int    `json:"reseller_id"`
 	CustomerUserId int    `json:"customer_user_id"`
 	Direction      string `json:"direction"`
-	Group          string `json:"group"`
 	RetailQuota    int64  `json:"retail_quota"`
 	EventKey       string `json:"event_key"`
 	Remark         string `json:"remark"`
@@ -342,14 +341,28 @@ func ResellerCreateCustomer(c *gin.Context) {
 		return
 	}
 	group := strings.TrimSpace(req.Group)
-	if group != "" {
-		// A reseller may only place a customer in a group it is authorized to
-		// resell; otherwise the customer would consume at an unpriced group.
-		costs, _, err := model.ListResellerPricingBook(profile.UserId)
-		if err != nil {
-			common.ApiError(c, err)
+	costs, _, err := model.ListResellerPricingBook(profile.UserId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	// A reseller may only place a customer in a group it is authorized to
+	// resell; otherwise the customer would consume at an unpriced group and the
+	// reseller could never fund it. With no group requested, prefer the
+	// reseller's first authorized group over a hard-coded "default", which the
+	// reseller usually has no wholesale price for.
+	if group == "" {
+		for _, cost := range costs {
+			if cost.Enabled {
+				group = cost.GroupName
+				break
+			}
+		}
+		if group == "" {
+			writeResellerError(c, model.ErrResellerGroupNotAllowed)
 			return
 		}
+	} else {
 		allowed := false
 		for _, cost := range costs {
 			if cost.Enabled && cost.GroupName == group {
@@ -361,8 +374,6 @@ func ResellerCreateCustomer(c *gin.Context) {
 			writeResellerError(c, model.ErrResellerGroupNotAllowed)
 			return
 		}
-	} else {
-		group = "default"
 	}
 	if req.DisplayName == "" {
 		req.DisplayName = req.Username
@@ -512,7 +523,6 @@ func ResellerTransfer(c *gin.Context) {
 	}
 	var req struct {
 		Direction   string `json:"direction"`
-		Group       string `json:"group"`
 		RetailQuota int64  `json:"retail_quota"`
 		EventKey    string `json:"event_key"`
 		Remark      string `json:"remark"`
@@ -524,7 +534,7 @@ func ResellerTransfer(c *gin.Context) {
 	if req.EventKey == "" {
 		req.EventKey = common.NewRequestId()
 	}
-	transfer, err := model.TransferResellerQuota(profile.UserId, customerId, profile.UserId, req.Direction, strings.TrimSpace(req.Group), req.RetailQuota, req.EventKey, strings.TrimSpace(req.Remark))
+	transfer, err := model.TransferResellerQuota(profile.UserId, customerId, profile.UserId, req.Direction, req.RetailQuota, req.EventKey, strings.TrimSpace(req.Remark))
 	if err != nil {
 		writeResellerError(c, err)
 		return

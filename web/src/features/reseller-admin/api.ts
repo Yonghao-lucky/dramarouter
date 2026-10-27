@@ -165,7 +165,6 @@ export async function transferResellerQuota(payload: {
   reseller_id: number
   customer_user_id: number
   direction: 'fund' | 'reclaim'
-  group?: string
   retail_quota: number
   remark?: string
 }) {

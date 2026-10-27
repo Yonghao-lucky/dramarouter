@@ -7350,6 +7350,7 @@
     "This combination will be billed as free.": "此组合将免费计费。",
     "This confirmation unlocks payment, redemption code, subscription plan, and invitation reward features. Please read the statements carefully.": "此确认会解锁支付、兑换码、订阅套餐和邀请奖励功能。请仔细阅读相关声明。",
     "This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.": "此处仅控制模型请求速率限制。Web/API 路由限流由环境变量配置，仍可能返回 429。",
+    "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.": "该客户所在分组不在你的价格表中，无法为其充值。请先把客户迁移到你的分组。",
     "This data may be unreliable, use with caution": "此数据可能不可靠，请谨慎使用",
     "This date is outside the formal accounting period.": "该日期不在正式记账范围内。",
     "This device does not support Passkey": "此设备不支持 Passkey",

@@ -7350,6 +7350,7 @@
     "This combination will be billed as free.": "Cette combinaison ne sera pas facturée.",
     "This confirmation unlocks payment, redemption code, subscription plan, and invitation reward features. Please read the statements carefully.": "Cette confirmation déverrouille les fonctionnalités de paiement, de codes de兑换, de forfaits d’abonnement et de récompenses d’invitation. Veuillez lire attentivement les déclarations.",
     "This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.": "Ce réglage contrôle la limitation des requêtes de modèles. La limitation des routes Web/API se configure via les variables d'environnement et peut encore renvoyer 429.",
+    "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.": "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.",
     "This data may be unreliable, use with caution": "Ces données peuvent être peu fiables, utilisez-les avec prudence",
     "This date is outside the formal accounting period.": "Cette date est en dehors de la période comptable officielle.",
     "This device does not support Passkey": "Cet appareil ne prend pas en charge Passkey",

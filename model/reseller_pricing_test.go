@@ -86,7 +86,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	require.NoError(t, DB.Create(&ResellerDefaultPrice{ResellerId: resellerID, GroupName: "vip", Ratio: "1.0"}).Error)
 
 	// 10000 retail at cost 0.8 / retail 1.0 costs the reseller 8000.
-	transfer, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "vip", 10000, "evt-fund-1", "seed")
+	transfer, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 10000, "evt-fund-1", "seed")
 	require.NoError(t, err)
 	assert.Equal(t, int64(8000), transfer.CostQuota)
 	assert.Equal(t, "1", transfer.RetailRatio)
@@ -100,7 +100,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	assert.Equal(t, 10000, customerQuota)
 
 	// The same event key is idempotent: no second movement.
-	again, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "vip", 10000, "evt-fund-1", "seed")
+	again, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 10000, "evt-fund-1", "seed")
 	require.NoError(t, err)
 	assert.Equal(t, transfer.Id, again.Id)
 	resellerQuota, err = GetUserQuota(resellerID, true)
@@ -108,7 +108,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	assert.Equal(t, 100000-8000, resellerQuota)
 
 	// Reclaim 4000 returns the average paid cost, not the money originally paid.
-	reclaim, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, "vip", 4000, "evt-reclaim-1", "unused")
+	reclaim, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, 4000, "evt-reclaim-1", "unused")
 	require.NoError(t, err)
 	assert.Equal(t, int64(3200), reclaim.CostQuota)
 	resellerQuota, err = GetUserQuota(resellerID, true)
@@ -119,7 +119,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	assert.Equal(t, 6000, customerQuota)
 
 	// A reclaim cannot exceed the outstanding retail position.
-	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, "vip", 7000, "evt-reclaim-2", "too much")
+	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, 7000, "evt-reclaim-2", "too much")
 	assert.ErrorIs(t, err, ErrResellerTransferInvalid)
 
 	reclaimable, err := ResellerReclaimableQuota(resellerID, customerID)
@@ -134,24 +134,30 @@ func TestResellerTransferGuards(t *testing.T) {
 	truncateTables(t)
 
 	const (
-		resellerID = 9411
-		customerID = 9412
-		otherID    = 9413
+		resellerID  = 9411
+		customerID  = 9412
+		otherID     = 9413
+		ungroupedID = 9414
 	)
 	require.NoError(t, DB.Create(&User{Id: resellerID, Username: "guard_reseller", Group: "default", AffCode: "trg1", Quota: 100}).Error)
 	require.NoError(t, DB.Create(&User{Id: customerID, Username: "guard_customer", Group: "vip", AffCode: "trg2"}).Error)
 	require.NoError(t, DB.Create(&User{Id: otherID, Username: "guard_other", Group: "default", AffCode: "trg3"}).Error)
+	// A customer sitting in a group the reseller has no cost row for.
+	require.NoError(t, DB.Create(&User{Id: ungroupedID, Username: "guard_ungrouped", Group: "default", AffCode: "trg4"}).Error)
 	require.NoError(t, DB.Create(&ResellerProfile{UserId: resellerID, Name: "r", Status: ResellerStatusEnabled}).Error)
 	require.NoError(t, SetResellerCustomerOwner(customerID, resellerID, resellerID, "seed"))
+	require.NoError(t, SetResellerCustomerOwner(ungroupedID, resellerID, resellerID, "seed"))
 	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.8", Enabled: true}).Error)
 
-	_, err := TransferResellerQuota(resellerID, otherID, resellerID, ResellerTransferFund, "vip", 1000, "evt-guard-own", "")
+	_, err := TransferResellerQuota(resellerID, otherID, resellerID, ResellerTransferFund, 1000, "evt-guard-own", "")
 	assert.ErrorIs(t, err, ErrResellerCustomerNotFound, "an unowned customer must never be funded")
 
-	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "default", 1000, "evt-guard-group", "")
-	assert.ErrorIs(t, err, ErrResellerGroupNotAllowed, "a group without a cost row cannot be sold")
+	// Pricing follows the customer's own group, so a customer in a group with no
+	// wholesale row is refused instead of being funded at some other group's cost.
+	_, err = TransferResellerQuota(resellerID, ungroupedID, resellerID, ResellerTransferFund, 1000, "evt-guard-group", "")
+	assert.ErrorIs(t, err, ErrResellerGroupNotAllowed, "the customer's own group must be in the price book")
 
-	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, "vip", 1000, "evt-guard-wallet", "")
+	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 1000, "evt-guard-wallet", "")
 	assert.ErrorIs(t, err, ErrResellerWalletShort, "the reseller must prepay the wholesale amount")
 }
 

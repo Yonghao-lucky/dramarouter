@@ -41,7 +41,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatQuota } from '@/lib/format'
+import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 
 import {
   createResellerCustomer,
@@ -149,7 +149,6 @@ function CustomerDetailDialog(props: {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [fundAmount, setFundAmount] = useState('')
-  const [fundGroup, setFundGroup] = useState('')
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
 
   const detail = useQuery({
@@ -163,6 +162,11 @@ function CustomerDetailDialog(props: {
     enabled: props.customerId != null,
   })
 
+  const authorizedGroups = groups.data ?? []
+  const customerGroupPriced = authorizedGroups.some(
+    (group) => group.group === detail.data?.group
+  )
+
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ['reseller'] })
 
@@ -170,8 +174,7 @@ function CustomerDetailDialog(props: {
     mutationFn: (direction: 'fund' | 'reclaim') =>
       transferResellerQuota(props.customerId as number, {
         direction,
-        group: fundGroup || undefined,
-        retail_quota: Math.round(Number(fundAmount)),
+        retail_quota: parseQuotaFromDollars(Number(fundAmount)),
       }),
     onSuccess: (_data, direction) => {
       toast.success(
@@ -180,7 +183,15 @@ function CustomerDetailDialog(props: {
       setFundAmount('')
       void refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
+  })
+
+  const moveCustomer = useMutation({
+    mutationFn: (group: string) =>
+      setResellerCustomerGroup(props.customerId as number, group),
+    onSuccess: () => {
+      toast.success(t('Group updated'))
+      void refresh()
+    },
   })
 
   const savePrice = useMutation({
@@ -194,7 +205,6 @@ function CustomerDetailDialog(props: {
       toast.success(t('Price updated'))
       void refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
   })
 
   const data: ResellerCustomerDetail | undefined = detail.data
@@ -247,18 +257,9 @@ function CustomerDetailDialog(props: {
                   value={fundAmount}
                   onChange={(event) => setFundAmount(event.target.value)}
                 />
-                <select
-                  className='border-input bg-background h-9 rounded-md border px-2 text-sm'
-                  value={fundGroup}
-                  onChange={(event) => setFundGroup(event.target.value)}
-                >
-                  <option value=''>{data.group}</option>
-                  {(groups.data ?? []).map((group) => (
-                    <option key={group.group} value={group.group}>
-                      {group.group}
-                    </option>
-                  ))}
-                </select>
+                <Badge variant='secondary' className='h-9 px-3 leading-9'>
+                  {data.group}
+                </Badge>
                 <Button
                   disabled={!fundAmount || transfer.isPending}
                   onClick={() => transfer.mutate('fund')}
@@ -278,6 +279,26 @@ function CustomerDetailDialog(props: {
                   'Funding charges your wallet the wholesale cost of that quota. Reclaiming returns what is left, at the average cost you paid.'
                 )}
               </p>
+              {customerGroupPriced ? null : (
+                <div className='mt-2 flex flex-wrap items-center gap-2'>
+                  <p className='text-destructive text-xs'>
+                    {t(
+                      'This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.'
+                    )}
+                  </p>
+                  {authorizedGroups.map((group) => (
+                    <Button
+                      key={group.group}
+                      size='sm'
+                      variant='outline'
+                      disabled={moveCustomer.isPending}
+                      onClick={() => moveCustomer.mutate(group.group)}
+                    >
+                      {group.group}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
@@ -413,7 +434,6 @@ function CustomersPanel() {
       setDisplayName('')
       void refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
   })
 
   const toggleStatus = useMutation({
@@ -423,7 +443,6 @@ function CustomersPanel() {
       toast.success(t('Status updated'))
       void refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
   })
 
   const resetPassword = useMutation({
@@ -432,7 +451,6 @@ function CustomersPanel() {
     onSuccess: () => {
       toast.success(t('Password reset'))
     },
-    onError: (error: Error) => toast.error(error.message),
   })
 
   const moveGroup = useMutation({
@@ -442,7 +460,6 @@ function CustomersPanel() {
       toast.success(t('Group updated'))
       void refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
   })
 
   return (

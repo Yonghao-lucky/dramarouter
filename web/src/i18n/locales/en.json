@@ -7350,6 +7350,7 @@
     "This combination will be billed as free.": "This combination will be billed as free.",
     "This confirmation unlocks payment, redemption code, subscription plan, and invitation reward features. Please read the statements carefully.": "This confirmation unlocks payment, redemption code, subscription plan, and invitation reward features. Please read the statements carefully.",
     "This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.": "This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.",
+    "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.": "This customer sits in a group that is not in your price book, so you cannot fund them. Move the customer to one of your groups first.",
     "This data may be unreliable, use with caution": "This data may be unreliable, use with caution",
     "This date is outside the formal accounting period.": "This date is outside the formal accounting period.",
     "This device does not support Passkey": "This device does not support Passkey",
