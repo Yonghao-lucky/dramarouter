@@ -85,17 +85,25 @@ func CreditResellerMargin(ownerId int, batch ResellerMarginCreditBatch) (bool, e
 		return false, nil
 	}
 	eventKey := "reseller:margin:" + strconv.Itoa(ownerId) + ":" + strconv.FormatInt(batch.LastSnapshotId, 10)
-	applied, err := PostBillingAdjustment(&BillingEntry{
-		EventKey:    eventKey,
-		UserID:      ownerId,
-		Kind:        "funding",
-		WalletDelta: batch.MarginQuota,
-	}, nil)
-	if err != nil {
-		return false, err
+	// Only a positive batch moves money. A batch that nets to zero or below is a
+	// loss (an administrator may price a customer below the reseller's cost), and
+	// a claim must never debit the reseller wallet on the reseller's request. The
+	// watermark still advances so the loss is settled once and is not retried.
+	applied := false
+	if batch.MarginQuota > 0 {
+		allowed, err := PostBillingAdjustment(&BillingEntry{
+			EventKey:    eventKey,
+			UserID:      ownerId,
+			Kind:        "funding",
+			WalletDelta: batch.MarginQuota,
+		}, nil)
+		if err != nil {
+			return false, err
+		}
+		applied = allowed
 	}
 	now := common.GetTimestamp()
-	err = DB.Transaction(func(tx *gorm.DB) error {
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var cursor ResellerMarginCreditCursor
 		err := lockForUpdate(tx).Where("owner_id = ?", ownerId).First(&cursor).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -112,4 +120,56 @@ func CreditResellerMargin(ownerId int, batch ResellerMarginCreditBatch) (bool, e
 		return tx.Model(&cursor).Updates(map[string]any{"last_snapshot_id": cursor.LastSnapshotId, "updated_at": now}).Error
 	})
 	return applied, err
+}
+
+// PendingResellerMarginQuota is the margin the reseller has earned but not yet
+// moved into the wallet. It is everything after the credit watermark, so it
+// stays a single indexed range scan.
+func PendingResellerMarginQuota(ownerId int) (int64, error) {
+	if ownerId <= 0 {
+		return 0, nil
+	}
+	cursor := ResellerMarginCreditCursor{OwnerId: ownerId}
+	err := DB.Where("owner_id = ?", ownerId).First(&cursor).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	var row struct {
+		Total int64 `gorm:"column:total"`
+	}
+	err = DB.Model(&CostAccountingSnapshot{}).
+		Where("owner_id = ? AND reseller_settlement = ? AND id > ?", ownerId, "self", cursor.LastSnapshotId).
+		Select("COALESCE(SUM(reseller_margin_quota),0) AS total").
+		Scan(&row).Error
+	if err != nil {
+		return 0, err
+	}
+	return row.Total, nil
+}
+
+// ClaimResellerMargin drains every pending batch into the reseller wallet and
+// returns the amount credited. Crediting is explicit: a reseller decides when
+// earned margin becomes spendable balance, so nothing is swept automatically.
+// Each batch is idempotent, so a retried claim cannot pay twice.
+func ClaimResellerMargin(ownerId int) (int64, error) {
+	if ownerId <= 0 {
+		return 0, ErrResellerTransferInvalid
+	}
+	var credited int64
+	for {
+		batch, err := NextResellerMarginCreditBatch(ownerId, 500)
+		if err != nil {
+			return credited, err
+		}
+		if batch.LastSnapshotId == 0 {
+			return credited, nil
+		}
+		applied, err := CreditResellerMargin(ownerId, batch)
+		if err != nil {
+			return credited, err
+		}
+		if applied {
+			credited += batch.MarginQuota
+		}
+	}
 }

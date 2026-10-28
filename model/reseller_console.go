@@ -23,6 +23,9 @@ type ResellerSummary struct {
 	CustomerBalance    int64 `json:"customer_balance_quota"`
 	RevenueQuota       int64 `json:"revenue_quota"`
 	MarginQuota        int64 `json:"margin_quota"`
+	// PendingMarginQuota is earned margin that the reseller has not yet moved
+	// into the wallet. Claiming it is an explicit action in the console.
+	PendingMarginQuota int64 `json:"pending_margin_quota"`
 	LastActivityAt     int64 `json:"last_activity_at"`
 }
 
@@ -35,7 +38,7 @@ type ResellerCustomerRow struct {
 	Status         int    `json:"status"`
 	WalletQuota    int64  `json:"wallet_quota"`
 	FundedQuota    int64  `json:"funded_quota"`
-	FundedCost     int64  `json:"funded_cost_quota"`
+	FundedCost     int64  `json:"funded_cost_quota" gorm:"column:funded_cost_quota"`
 	UsedQuota      int64  `json:"used_quota"`
 	RequestCount   int    `json:"request_count"`
 	LastActivityAt int64  `json:"last_activity_at"`
@@ -133,6 +136,11 @@ func GetResellerSummary(resellerUserId int) (*ResellerSummary, error) {
 		return nil, err
 	}
 	summary.RevenueQuota, summary.MarginQuota = usage.Revenue, usage.Margin
+	pending, err := PendingResellerMarginQuota(resellerUserId)
+	if err != nil {
+		return nil, err
+	}
+	summary.PendingMarginQuota = pending
 	return summary, nil
 }
 
@@ -192,6 +200,24 @@ func GetResellerCustomerDetail(resellerUserId, customerUserId int) (*ResellerCus
 		return nil, err
 	}
 	detail.Prices = prices
+	// The drawer shows the same wallet state as the list row, so the transfer
+	// aggregate is filled here too instead of leaving the funded columns at zero.
+	var transfersAgg struct {
+		Funded         int64 `gorm:"column:funded_quota"`
+		FundedCost     int64 `gorm:"column:funded_cost_quota"`
+		LastActivityAt int64 `gorm:"column:last_activity_at"`
+	}
+	if err := DB.Model(&ResellerTransfer{}).
+		Where("reseller_id = ? AND customer_user_id = ?", resellerUserId, customerUserId).
+		Select(`COALESCE(SUM(CASE WHEN direction = 'fund' THEN retail_quota ELSE -retail_quota END),0) AS funded_quota,
+			COALESCE(SUM(CASE WHEN direction = 'fund' THEN cost_quota ELSE -cost_quota END),0) AS funded_cost_quota,
+			COALESCE(MAX(created_at),0) AS last_activity_at`).
+		Scan(&transfersAgg).Error; err != nil {
+		return nil, err
+	}
+	detail.FundedQuota = transfersAgg.Funded
+	detail.FundedCost = transfersAgg.FundedCost
+	detail.LastActivityAt = transfersAgg.LastActivityAt
 	transfers := make([]ResellerTransfer, 0, 20)
 	if err := DB.Where("reseller_id = ? AND customer_user_id = ?", resellerUserId, customerUserId).
 		Order("id desc").Limit(20).Find(&transfers).Error; err != nil {

@@ -282,6 +282,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.GET("/logs", controller.ResellerCustomerLogs)
 			resellerRoute.GET("/tasks", controller.ResellerCustomerTasks)
 			resellerRoute.GET("/margins", controller.ResellerMargins)
+			resellerRoute.POST("/margins/claim", controller.ResellerClaimMargin)
 			resellerRoute.GET("/price-book", controller.ResellerPriceBook)
 			resellerRoute.GET("/groups", controller.ResellerPlatformGroups)
 		}

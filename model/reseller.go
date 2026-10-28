@@ -285,6 +285,12 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 		var existing ResellerTransfer
 		err := tx.Where("event_key = ?", eventKey).First(&existing).Error
 		if err == nil {
+			// The event key is globally unique, so a key reused by a different
+			// reseller or customer would otherwise replay another tenant's
+			// transfer row as a success. Only the same movement may replay.
+			if existing.ResellerId != resellerUserId || existing.CustomerUserId != customerUserId || existing.Direction != direction {
+				return ErrResellerTransferInvalid
+			}
 			*transfer = existing
 			return nil
 		}

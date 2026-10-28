@@ -652,6 +652,30 @@ func ResellerMargins(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
 }
 
+// ResellerClaimMargin moves every pending margin batch into the caller's wallet.
+// Crediting is explicit: earned profit stays pending until the reseller asks for
+// it, and a replayed request cannot pay the same batch twice.
+func ResellerClaimMargin(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	credited, err := model.ClaimResellerMargin(profile.UserId)
+	if err != nil {
+		writeResellerError(c, err)
+		return
+	}
+	pending, err := model.PendingResellerMarginQuota(profile.UserId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"credited_quota": credited,
+		"pending_quota":  pending,
+	}})
+}
+
 // ResellerPriceBook returns the reseller's own cost book and standing prices so
 // the console can show the margin it makes per group.
 func ResellerPriceBook(c *gin.Context) {

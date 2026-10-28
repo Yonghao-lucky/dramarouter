@@ -52,13 +52,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 
 import {
+  claimResellerMargin,
   createResellerCustomer,
   getResellerCustomerDetail,
   getResellerCustomerGroups,
   getResellerCustomers,
   getResellerLogs,
   getResellerMargins,
-  getResellerPriceBook,
+  getResellerPlatformGroups,
   getResellerSummary,
   getResellerTransfers,
   getResellerUsage,
@@ -144,6 +145,11 @@ function OverviewPanel() {
           title={t('Realized margin')}
           value={formatQuota(data?.margin_quota ?? 0)}
           hint={t('Retail minus your wholesale cost')}
+        />
+        <StatCard
+          title={t('Pending margin')}
+          value={formatQuota(data?.pending_margin_quota ?? 0)}
+          hint={t('Credit it from the Profit tab')}
         />
       </div>
     </div>
@@ -270,7 +276,7 @@ function CustomerDetailDialog(props: {
               </div>
               <p className='text-muted-foreground mt-2 text-xs'>
                 {t(
-                  'Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, credited as the customer consumes.'
+                  'Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.'
                 )}
               </p>
             </div>
@@ -980,10 +986,29 @@ function LogsPanel() {
 
 function ProfitPanel() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const summary = useQuery({
+    queryKey: ['reseller', 'summary'],
+    queryFn: getResellerSummary,
+  })
   const margins = useQuery({
     queryKey: ['reseller', 'margins'],
     queryFn: () => getResellerMargins(),
   })
+  // Claiming is explicit: earned margin is listed as pending until the reseller
+  // moves it into the wallet themselves.
+  const claim = useMutation({
+    mutationFn: claimResellerMargin,
+    onSuccess: (result) => {
+      toast.success(
+        t('Credited {{amount}} to your wallet', {
+          amount: formatQuota(result.credited_quota),
+        })
+      )
+      void queryClient.invalidateQueries({ queryKey: ['reseller'] })
+    },
+  })
+  const pending = summary.data?.pending_margin_quota ?? 0
   const total = useMemo(
     () =>
       (margins.data ?? []).reduce(
@@ -999,13 +1024,31 @@ function ProfitPanel() {
 
   return (
     <div className='flex flex-col gap-3'>
-      <div className='grid gap-3 sm:grid-cols-3'>
+      <div className='grid gap-3 sm:grid-cols-4'>
         <StatCard
           title={t('Consumption (31d)')}
           value={formatQuota(total.revenue)}
         />
         <StatCard title={t('Margin (31d)')} value={formatQuota(total.margin)} />
         <StatCard title={t('Requests')} value={String(total.requests)} />
+        <StatCard
+          title={t('Pending margin')}
+          value={formatQuota(pending)}
+          hint={t('Available to credit into your wallet')}
+        />
+      </div>
+      <div className='flex items-center gap-2'>
+        <Button
+          disabled={pending <= 0 || claim.isPending}
+          onClick={() => claim.mutate()}
+        >
+          {claim.isPending ? t('Crediting') : t('Credit to wallet')}
+        </Button>
+        <span className='text-muted-foreground text-xs'>
+          {t(
+            'Margin is not paid out automatically. It stays pending until you credit it.'
+          )}
+        </span>
       </div>
       <Table>
         <TableHeader>
@@ -1042,9 +1085,12 @@ function ProfitPanel() {
 
 function PriceBookPanel() {
   const { t } = useTranslation()
-  const book = useQuery({
-    queryKey: ['reseller', 'price-book'],
-    queryFn: getResellerPriceBook,
+  // Every platform group is listed, not just the groups that already have a
+  // wholesale cost row: a reseller needs to see which groups they can sell in
+  // and which still have no cost configured.
+  const groups = useQuery({
+    queryKey: ['reseller', 'platform-groups'],
+    queryFn: getResellerPlatformGroups,
   })
 
   return (
@@ -1057,23 +1103,18 @@ function PriceBookPanel() {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {(book.data?.costs ?? []).map((cost) => {
-          const standing = (book.data?.defaults ?? []).find(
-            (row) => row.group === cost.group
-          )
-          return (
-            <TableRow key={cost.group}>
-              <TableCell>{cost.group}</TableCell>
-              <TableCell className='tabular-nums'>{cost.cost_ratio}</TableCell>
-              <TableCell className='tabular-nums'>
-                {standing?.ratio ?? cost.cost_ratio}
-              </TableCell>
-            </TableRow>
-          )
-        })}
-        {(book.data?.costs ?? []).length === 0 ? (
-          <EmptyRow colSpan={3} />
-        ) : null}
+        {(groups.data ?? []).map((row) => (
+          <TableRow key={row.group}>
+            <TableCell>{row.group}</TableCell>
+            <TableCell className='tabular-nums'>
+              {row.sellable ? row.cost_ratio : t('No cost set')}
+            </TableCell>
+            <TableCell className='tabular-nums'>
+              {row.sellable ? row.ratio || row.cost_ratio : '—'}
+            </TableCell>
+          </TableRow>
+        ))}
+        {(groups.data ?? []).length === 0 ? <EmptyRow colSpan={3} /> : null}
       </TableBody>
     </Table>
   )

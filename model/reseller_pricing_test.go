@@ -281,3 +281,35 @@ func TestResellerOwnershipHistoryIsAppendOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, owner)
 }
+
+// TestResellerTransferEventKeyCannotCrossTenants locks the replay guard: the
+// event key is globally unique, so a key another reseller already used must be
+// a refusal rather than a success that returns someone else's transfer record.
+func TestResellerTransferEventKeyCannotCrossTenants(t *testing.T) {
+	truncateTables(t)
+
+	const (
+		resellerA = 9431
+		customerA = 9432
+		resellerB = 9433
+		customerB = 9434
+	)
+	require.NoError(t, DB.Create(&User{Id: resellerA, Username: "evt_reseller_a", Group: "default", AffCode: "eva1", Quota: 10000}).Error)
+	require.NoError(t, DB.Create(&User{Id: customerA, Username: "evt_customer_a", Group: "default", AffCode: "ecc1"}).Error)
+	require.NoError(t, DB.Create(&User{Id: resellerB, Username: "evt_reseller_b", Group: "default", AffCode: "evb1", Quota: 10000}).Error)
+	require.NoError(t, DB.Create(&User{Id: customerB, Username: "evt_customer_b", Group: "default", AffCode: "ecc2"}).Error)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: resellerA, Name: "a", Status: ResellerStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: resellerB, Name: "b", Status: ResellerStatusEnabled}).Error)
+	require.NoError(t, SetResellerCustomerOwner(customerA, resellerA, resellerA, "seed"))
+	require.NoError(t, SetResellerCustomerOwner(customerB, resellerB, resellerB, "seed"))
+
+	_, err := TransferResellerQuota(resellerA, customerA, resellerA, ResellerTransferFund, 5000, "evt-shared", "")
+	require.NoError(t, err)
+
+	_, err = TransferResellerQuota(resellerB, customerB, resellerB, ResellerTransferFund, 7000, "evt-shared", "")
+	assert.ErrorIs(t, err, ErrResellerTransferInvalid, "another tenant's event key must not replay")
+
+	quotaB, err := GetUserQuota(resellerB, true)
+	require.NoError(t, err)
+	assert.Equal(t, 10000, quotaB, "the refused replay moves no money")
+}

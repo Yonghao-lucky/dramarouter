@@ -28,8 +28,12 @@ type resellerMarginCreditHandler struct{}
 
 func (resellerMarginCreditHandler) Type() string { return model.SystemTaskTypeResellerMarginCredit }
 
+// Enabled is off by default. Margin is credited only when the reseller asks for
+// it (POST /api/reseller/margins/claim), so earned profit stays visible as a
+// pending balance instead of silently landing in the wallet. Setting
+// RESELLER_MARGIN_CREDIT_ENABLED=true restores the automatic sweep.
 func (resellerMarginCreditHandler) Enabled() bool {
-	return common.GetEnvOrDefaultBool("RESELLER_MARGIN_CREDIT_ENABLED", true)
+	return common.GetEnvOrDefaultBool("RESELLER_MARGIN_CREDIT_ENABLED", false)
 }
 
 func (resellerMarginCreditHandler) Interval() time.Duration {

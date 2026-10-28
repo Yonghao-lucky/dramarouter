@@ -8548,7 +8548,7 @@
     "footer.columns.related.links.oneApi": "Один API",
     "footer.columns.related.title": "Связанные проекты",
     "footer.defaultCopyright": "Все права защищены.",
-    "footer.new\u0061pi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
+    "footer.newapi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
     "gpt-3.5-turbo": "gpt-3.5-turbo",
     "gpt-3.5-turbo-0125": "gpt-3.5-turbo-0125",
     "gpt-4": "gpt-4",
@@ -8817,6 +8817,14 @@
     "Creating": "Creating",
     "Reset password for {{name}}": "Reset password for {{name}}",
     "A customer may call any group with their key. You earn the spread only on groups where you have a wholesale cost; the others still work for the customer at the platform price.": "A customer may call any group with their key. You earn the spread only on groups where you have a wholesale cost; the others still work for the customer at the platform price.",
-    "The customer is an ordinary account: they start in the default group and may call any group with their key.": "The customer is an ordinary account: they start in the default group and may call any group with their key."
+    "The customer is an ordinary account: they start in the default group and may call any group with their key.": "The customer is an ordinary account: they start in the default group and may call any group with their key.",
+    "Pending margin": "Pending margin",
+    "Available to credit into your wallet": "Available to credit into your wallet",
+    "Crediting": "Crediting",
+    "Credit to wallet": "Credit to wallet",
+    "Margin is not paid out automatically. It stays pending until you credit it.": "Margin is not paid out automatically. It stays pending until you credit it.",
+    "Credited {{amount}} to your wallet": "Credited {{amount}} to your wallet",
+    "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.": "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.",
+    "Credit it from the Profit tab": "Credit it from the Profit tab"
   }
 }

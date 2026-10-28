@@ -247,6 +247,16 @@ export async function getResellerMargins(start?: number, end?: number) {
   )
 }
 
+export async function claimResellerMargin() {
+  return unwrap(
+    (
+      await api.post<
+        Response<{ credited_quota: number; pending_quota: number }>
+      >('/api/reseller/margins/claim')
+    ).data
+  )
+}
+
 export async function getResellerPriceBook() {
   return unwrap(
     (await api.get<Response<ResellerPriceBook>>('/api/reseller/price-book'))

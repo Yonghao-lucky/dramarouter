@@ -27,6 +27,8 @@ export interface ResellerSummary {
   customer_balance_quota: number
   revenue_quota: number
   margin_quota: number
+  /** Earned but not yet moved into the wallet. Crediting is manual. */
+  pending_margin_quota: number
   last_activity_at: number
 }
 
