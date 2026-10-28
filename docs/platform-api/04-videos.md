@@ -61,7 +61,7 @@ Action=CreateAssetGroup    Action=CreateAsset         POST /api/v3/.../tasks    
 #### (1) 官方首选方案：素材库句柄调用示例 (多图人像一致性参考 · 杜绝真人拦截)
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/api/v3/contents/generations/tasks' \
+curl --fail-with-body --request POST 'https://realmdrama.com/api/v3/contents/generations/tasks' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
@@ -168,7 +168,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/api/v3/con
 - **请求头**：`Authorization: Bearer YOUR_API_KEY`
 
 ```bash
-curl --fail-with-body --request GET 'https://gateway.ai.shilijia.xyz/api/v3/contents/generations/tasks/cgt-20260924081530-ab123' \
+curl --fail-with-body --request GET 'https://realmdrama.com/api/v3/contents/generations/tasks/cgt-20260924081530-ab123' \
   --header 'Authorization: Bearer YOUR_API_KEY'
 ```
 
@@ -213,7 +213,7 @@ curl --fail-with-body --request GET 'https://gateway.ai.shilijia.xyz/api/v3/cont
   - `filter.status`：按状态筛选（`queued` / `running` / `succeeded` / `failed`）
 
 ```bash
-curl --fail-with-body --request GET 'https://gateway.ai.shilijia.xyz/api/v3/contents/generations/tasks?page_num=1&page_size=10&filter.status=succeeded' \
+curl --fail-with-body --request GET 'https://realmdrama.com/api/v3/contents/generations/tasks?page_num=1&page_size=10&filter.status=succeeded' \
   --header 'Authorization: Bearer YOUR_API_KEY'
 ```
 
@@ -246,7 +246,7 @@ curl --fail-with-body --request GET 'https://gateway.ai.shilijia.xyz/api/v3/cont
 - **请求头**：`Authorization: Bearer YOUR_API_KEY`
 
 ```bash
-curl --fail-with-body --request DELETE 'https://gateway.ai.shilijia.xyz/api/v3/contents/generations/tasks/cgt-20260924081530-ab123' \
+curl --fail-with-body --request DELETE 'https://realmdrama.com/api/v3/contents/generations/tasks/cgt-20260924081530-ab123' \
   --header 'Authorization: Bearer YOUR_API_KEY'
 ```
 
@@ -293,7 +293,7 @@ curl --fail-with-body --request DELETE 'https://gateway.ai.shilijia.xyz/api/v3/c
 支持将素材库 `asset://` 句柄置于 `metadata.content` 列表中传入：
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/video/generations' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/video/generations' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
@@ -381,7 +381,7 @@ Wan3 渠道的参数覆盖在请求格式转换和参数校验前执行。条件
 提供实时百分比进度（`progress`）的扩展状态展示：
 
 ```bash
-curl --fail-with-body --request GET 'https://gateway.ai.shilijia.xyz/v1/video/generations/task_TjyIFnCBCqj4UgdIkpP7mHFnZDbqZkx4' \
+curl --fail-with-body --request GET 'https://realmdrama.com/v1/video/generations/task_TjyIFnCBCqj4UgdIkpP7mHFnZDbqZkx4' \
   --header 'Authorization: Bearer YOUR_API_KEY'
 ```
 
@@ -394,7 +394,7 @@ curl --fail-with-body --request GET 'https://gateway.ai.shilijia.xyz/v1/video/ge
     "task_id": "task_TjyIFnCBCqj4UgdIkpP7mHFnZDbqZkx4",
     "status": "SUCCESS",
     "progress": "100%",
-    "result_url": "https://gateway.ai.shilijia.xyz/output/video/task_xxx.mp4"
+    "result_url": "https://realmdrama.com/output/video/task_xxx.mp4"
   }
 }
 ```

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowUpRight, Layers } from 'lucide-react'
+import { Layers } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
@@ -56,19 +56,6 @@ function EmptyAboutState() {
       </p>
       <div className='flex flex-wrap justify-center gap-3'>
         <Button render={<Link to='/pricing' />}>{t('Model Square')}</Button>
-        <Button
-          variant='outline'
-          render={
-            <a
-              href='https://ai.shilijia.xyz/'
-              target='_blank'
-              rel='noopener noreferrer'
-            />
-          }
-        >
-          {t('Explore Shilijia AI')}
-          <ArrowUpRight aria-hidden className='size-4' />
-        </Button>
       </div>
       <a
         className='text-muted-foreground hover:text-foreground mt-4 text-xs underline underline-offset-4'

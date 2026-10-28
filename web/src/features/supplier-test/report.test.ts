@@ -77,7 +77,7 @@ function makeTestInput(): ReportInput {
   const std = getStandard('default')
 
   return {
-    baseUrl: 'https://maas.ai.shilijia.xyz/v1',
+    baseUrl: 'https://gateway.example.com/v1',
     model: 'glm-5.2',
     standardLabel: 'Default standard',
     basicChecks,

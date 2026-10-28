@@ -4,9 +4,9 @@
 
 ## 基础配置
 
-**网关地址：`https://gateway.ai.shilijia.xyz`**
+**网关地址：`https://realmdrama.com`**
 
-请求体统一使用 JSON，请求头填写 `Content-Type: application/json`。调用地址由网关地址和接口路径组成，例如 `https://gateway.ai.shilijia.xyz/v1/chat/completions`。
+请求体统一使用 JSON，请求头填写 `Content-Type: application/json`。调用地址由网关地址和接口路径组成，例如 `https://realmdrama.com/v1/chat/completions`。
 
 | 接口分类 | 鉴权方式 | 请求头格式 | 获取入口 |
 | --- | --- | --- | --- |

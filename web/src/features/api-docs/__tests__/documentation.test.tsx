@@ -189,14 +189,12 @@ test('quickstart presents and copies gateway address while other articles omit i
   await renderDocumentation('/docs?article=quickstart')
   await screen.findByRole('heading', { level: 1, name: '快速开始' })
   const addresses = screen.getByRole('region', { name: 'Gateway URL' })
-  expect(
-    within(addresses).getByText('https://gateway.ai.shilijia.xyz')
-  ).toBeVisible()
+  expect(within(addresses).getByText(window.location.origin)).toBeVisible()
 
   await user.click(
     within(addresses).getByRole('button', { name: 'Copy Gateway URL' })
   )
-  expect(writeText).toHaveBeenCalledWith('https://gateway.ai.shilijia.xyz')
+  expect(writeText).toHaveBeenCalledWith(window.location.origin)
 
   cleanup()
   await renderDocumentation('/docs?article=text')

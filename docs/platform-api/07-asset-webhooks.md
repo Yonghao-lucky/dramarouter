@@ -94,7 +94,7 @@ webhook-timestamp: 1791264000
 创建端点示例：
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/api/webhook-endpoints' \
+curl --fail-with-body --request POST 'https://realmdrama.com/api/webhook-endpoints' \
   --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
   --header 'Content-Type: application/json' \
   --data-raw '{

@@ -47,10 +47,10 @@ import { Document } from './document'
 import '@/styles/api-docs.css'
 
 type APIDocument = { id: string; title: string; content: string }
-const GATEWAY_URL = 'https://gateway.ai.shilijia.xyz'
 
 export function APIDocs() {
   const { t } = useTranslation()
+  const gatewayURL = window.location.origin
   const { article = 'quickstart' } = useSearch({ from: '/docs/' })
   const { access } = useRouteContext({ from: '/docs/' })
   const userID = useAuthStore((state) => state.auth.user?.id)
@@ -165,16 +165,16 @@ export function APIDocs() {
                   </span>
                 </div>
                 <a
-                  href={GATEWAY_URL}
+                  href={gatewayURL}
                   target='_blank'
                   rel='noopener noreferrer'
                   className='text-foreground hover:text-primary block font-mono text-sm font-semibold tracking-tight break-all transition-colors hover:underline'
                 >
-                  {GATEWAY_URL}
+                  {gatewayURL}
                 </a>
               </div>
               <CopyButton
-                value={GATEWAY_URL}
+                value={gatewayURL}
                 size='sm'
                 className='shrink-0'
                 aria-label={`${t('Copy')} ${t('Gateway URL')}`}

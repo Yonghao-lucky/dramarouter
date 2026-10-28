@@ -16,7 +16,7 @@
 ### 请求示例
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/chat/completions' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/chat/completions' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
@@ -71,7 +71,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/chat/co
 ### 请求示例
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/chat/completions' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/chat/completions' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{

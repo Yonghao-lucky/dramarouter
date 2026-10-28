@@ -16,7 +16,7 @@ make dev-local
 
 然后在微信开发者工具中导入 `miniapp/`。开发骨架使用 `touristappid`，需要登录、真机、合法域名或支付能力时，在本机的 `project.private.config.json` 中配置真实 AppID；该文件不会提交。
 
-`MINIAPP_API_BASE_URL` 会在构建时写入客户端，只能放公开的 API 基地址，不能放任何 Secret。`Makefile` 固定了本地 `http://127.0.0.1:3000` 和远端 `https://gateway.ai.shilijia.xyz` 两个地址：`make local` / `make remote` 分别生成对应的 `dist/`，`make dev-local` / `make dev-remote` 用于持续监听构建。正式环境必须使用已在微信公众平台配置的 HTTPS 合法域名。
+`MINIAPP_API_BASE_URL` 会在构建时写入客户端，只能放公开的 API 基地址，不能放任何 Secret。`Makefile` 固定了本地 `http://127.0.0.1:3000` 和远端 `https://realmdrama.com` 两个地址：`make local` / `make remote` 分别生成对应的 `dist/`，`make dev-local` / `make dev-remote` 用于持续监听构建。正式环境必须使用已在微信公众平台配置的 HTTPS 合法域名。
 每次重新构建都要显式选择目标环境；未传入 `MINIAPP_API_BASE_URL` 时虽然可以编译，但小程序不会连接后端。录音相关隐私声明需在微信小程序管理后台完成，不要在 `app.json` 中添加开发者工具不支持的 `permission.scope.record` 字段。
 
 ## 真机与环境切换

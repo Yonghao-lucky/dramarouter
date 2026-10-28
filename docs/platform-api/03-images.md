@@ -24,7 +24,7 @@
 #### 请求示例
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/generations' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/images/generations' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
@@ -44,7 +44,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/
   "created": 1791264000,
   "data": [
     {
-      "url": "https://gateway.ai.shilijia.xyz/v1/download/image/sample_01.png",
+      "url": "https://realmdrama.com/v1/download/image/sample_01.png",
       "revised_prompt": "清晨薄雾笼罩下的金色稻田，日光穿透云层洒向大地，电影质感，超清写实细节"
     }
   ]
@@ -58,7 +58,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/
 将 `response_format` 设为 `b64_json`，适合内网隔离环境或无需外链存储的场景：
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/generations' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/images/generations' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
@@ -75,7 +75,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/
 将 `stream` 设为 `true` 后，服务端按 **Server-Sent Events (SSE)** 协议实时推流：
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/generations' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/images/generations' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
@@ -89,7 +89,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/
 
 ```text
 event: image_generation.completed
-data: {"type":"image_generation.completed","created_at":1791264000,"url":"https://gateway.ai.shilijia.xyz/v1/download/image/sample_02.png","usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}
+data: {"type":"image_generation.completed","created_at":1791264000,"url":"https://realmdrama.com/v1/download/image/sample_02.png","usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}
 
 data: [DONE]
 ```
@@ -101,7 +101,7 @@ data: [DONE]
 ### JSON 调用（URL / Base64 输入）
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/edits' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/images/edits' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
@@ -115,7 +115,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/
 ### Multipart 上传本地文件
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/edits' \
+curl --fail-with-body --request POST 'https://realmdrama.com/v1/images/edits' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --form 'model="YOUR_IMAGE_MODEL_ID"' \
   --form 'image=@"origin-photo.png"' \
@@ -128,7 +128,7 @@ curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/v1/images/
 当需要直接使用火山引擎方舟原生数据结构与高级参数时，可直接请求原生路由：
 
 ```bash
-curl --fail-with-body --request POST 'https://gateway.ai.shilijia.xyz/api/v3/images/generations' \
+curl --fail-with-body --request POST 'https://realmdrama.com/api/v3/images/generations' \
   --header 'Authorization: Bearer YOUR_API_KEY' \
   --header 'Content-Type: application/json' \
   --data-raw '{
