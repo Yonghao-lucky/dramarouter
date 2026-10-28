@@ -41,7 +41,7 @@ func TestGrantResellerWalletRecordsKindAndIsIdempotent(t *testing.T) {
 
 	// The same key bound to a different amount is a conflict, not a replay.
 	_, err = GrantResellerWallet(resellerID, operatorID, 9000, ResellerGrantPrecredit, "opening credit", "grant-evt-1")
-	assert.ErrorIs(t, err, ErrResellerGrantReplay)
+	assert.ErrorIs(t, err, ErrResellerGrantConflict)
 
 	rows, err := ListResellerWalletGrants(resellerID, 10)
 	require.NoError(t, err)

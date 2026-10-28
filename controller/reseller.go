@@ -162,7 +162,7 @@ func AdminGrantResellerWallet(c *gin.Context) {
 	}
 	grant, err := model.GrantResellerWallet(req.ResellerId, c.GetInt("id"), req.Quota, req.Kind, req.Remark, req.EventKey)
 	if err != nil {
-		if errors.Is(err, model.ErrResellerGrantInvalid) || errors.Is(err, model.ErrResellerGrantReplay) {
+		if errors.Is(err, model.ErrResellerGrantInvalid) || errors.Is(err, model.ErrResellerGrantReplay) || errors.Is(err, model.ErrResellerGrantConflict) {
 			common.ApiErrorMsg(c, err.Error())
 			return
 		}

@@ -19,8 +19,9 @@ const (
 )
 
 var (
-	ErrResellerGrantInvalid = errors.New("invalid reseller grant")
-	ErrResellerGrantReplay  = errors.New("this reseller grant was already applied to a different reseller")
+	ErrResellerGrantInvalid  = errors.New("invalid reseller grant")
+	ErrResellerGrantReplay   = errors.New("this event key belongs to another reseller's grant")
+	ErrResellerGrantConflict = errors.New("this event key was already used with a different amount or type")
 )
 
 // ResellerWalletGrant is one administrator top-up of a reseller wallet. It is
@@ -74,6 +75,8 @@ func GrantResellerWallet(resellerId, operatorId int, amount int64, kind, remark,
 	if profile == nil {
 		return nil, ErrResellerNotEnabled
 	}
+	// A disabled profile may still be topped up: suspension freezes selling, not
+	// the administrator's ability to settle or pre-fund the account.
 	remark = strings.TrimSpace(remark)
 	if len(remark) > 255 {
 		remark = remark[:255]
@@ -84,8 +87,11 @@ func GrantResellerWallet(resellerId, operatorId int, amount int64, kind, remark,
 		var existing ResellerWalletGrant
 		err := tx.Where("event_key = ?", eventKey).First(&existing).Error
 		if err == nil {
-			if existing.ResellerId != resellerId || existing.Amount != amount || existing.Kind != normalized {
+			if existing.ResellerId != resellerId {
 				return ErrResellerGrantReplay
+			}
+			if existing.Amount != amount || existing.Kind != normalized {
+				return ErrResellerGrantConflict
 			}
 			*grant = existing
 			return nil
