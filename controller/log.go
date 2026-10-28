@@ -157,7 +157,10 @@ func GetLogsStat(c *gin.Context) {
 func GetLogsSelfStat(c *gin.Context) {
 	filter := costAccountingFilterFromQuery(c)
 	filter.IncludeBillingCorrections = false
-	filter.UserID = c.GetInt("id")
+	// The statistics card must cover exactly what the table below it lists, so a
+	// reseller's totals include their customers' consumption.
+	userIds, _ := resellerLogScope(c.GetInt("id"))
+	filter.SetUserScope(userIds)
 	filter.Username = ""
 	statistics, err := model.SumLogStatistics(filter)
 	if err != nil {

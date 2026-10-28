@@ -127,6 +127,22 @@ type CostAccountingFilter struct {
 	UpstreamRequestID         string
 }
 
+// SetUserScope narrows a request-scoped filter to an explicit set of users.
+// Callers build the set server-side (the caller plus the customers a reseller
+// owns); it is never read from the request, so a caller cannot widen it.
+func (f *CostAccountingFilter) SetUserScope(userIDs []int) {
+	f.UserID = 0
+	f.userIDs = nil
+	if len(userIDs) == 0 {
+		return
+	}
+	if len(userIDs) == 1 {
+		f.UserID = userIDs[0]
+		return
+	}
+	f.userIDs = userIDs
+}
+
 type CostAccountingTotals struct {
 	ConsumptionQuota   int64 `json:"consumption_quota"`
 	RefundQuota        int64 `json:"refund_quota"`
@@ -427,6 +443,8 @@ func applyCostAccountingFilter(tx *gorm.DB, filter CostAccountingFilter) (*gorm.
 	}
 	if filter.UserID != 0 {
 		tx = tx.Where("snapshots.user_id = ?", filter.UserID)
+	} else if len(filter.userIDs) > 0 {
+		tx = tx.Where("snapshots.user_id IN ?", filter.userIDs)
 	}
 	if filter.OwnerID != 0 {
 		tx = tx.Where("snapshots.owner_id = ?", filter.OwnerID)
