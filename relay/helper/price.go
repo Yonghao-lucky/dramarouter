@@ -77,12 +77,15 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 	return groupRatioInfo
 }
 
-// applyResellerPricing overrides the resolved group ratio when the customer has
-// a configured reseller price for this billing group, and always attaches the
-// reseller evidence the margin rollup needs. A customer whose group has no
-// reseller retail price is still charged the platform ratio, but the spread
-// between that ratio and the reseller's wholesale cost is the reseller's margin
-// and must be recorded when a wholesale cost exists.
+// applyResellerPricing overrides the resolved group ratio when the customer has a
+// configured reseller price for this billing group, and always attaches the
+// reseller evidence the margin rollup needs.
+//
+// The retail override is independent of ownership: an administrator may set a
+// per-user group price on an ordinary platform account, which has no reseller
+// owner and therefore no wholesale cost. That price must still be charged, so
+// the override is applied before any ownership check; owner and cost only decide
+// whether margin evidence exists.
 func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *hosttypes.GroupRatioInfo) {
 	relayInfo.ResellerOwnerID = 0
 	relayInfo.ResellerCostRatio = 0
@@ -95,15 +98,19 @@ func applyResellerPricing(relayInfo *relaycommon.RelayInfo, groupRatioInfo *host
 		logger.LogError(nil, "failed to resolve reseller pricing: "+err.Error())
 		return
 	}
-	if pricing.OwnerID <= 0 || pricing.CostRatio <= 0 {
-		return
-	}
 	if pricing.Override {
 		groupRatioInfo.GroupSpecialRatio = pricing.Retail
 		groupRatioInfo.GroupRatio = pricing.Retail
 		groupRatioInfo.HasSpecialRatio = true
 		relayInfo.ResellerRetailRatio = pricing.Retail
-	} else {
+	}
+	// Margin evidence only exists when a reseller owns the customer and the group
+	// has a wholesale cost. A platform-direct customer keeps the override above
+	// and records no margin.
+	if pricing.OwnerID <= 0 || pricing.CostRatio <= 0 {
+		return
+	}
+	if !pricing.Override {
 		relayInfo.ResellerRetailRatio = groupRatioInfo.GroupRatio
 	}
 	relayInfo.ResellerOwnerID = pricing.OwnerID
