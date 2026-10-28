@@ -100,6 +100,52 @@ export function TaskLogDetailsCell({
     log.status === TASK_STATUS.SUCCESS &&
     VIDEO_ACTIONS.has(action) &&
     Boolean(log.task_id)
+  const [videoOpening, setVideoOpening] = useState(false)
+
+  // A plain anchor navigates the browser to the content route without the
+  // Authorization header the dashboard uses, so the relay authenticates it as
+  // an anonymous API call and answers "invalid token". Opening goes through the
+  // same authenticated path as the download instead: ask for the delivery mode,
+  // then either follow the signed redirect or hand the fetched blob to a new
+  // tab.
+  const handleVideoOpen = async () => {
+    if (videoOpening) return
+    setVideoOpening(true)
+    const tab = window.open('', '_blank')
+    try {
+      const contentInfo = await getTaskVideoContentInfo(log.task_id)
+      if (!contentInfo.success || !contentInfo.data) {
+        throw new Error(contentInfo.message || 'video content unavailable')
+      }
+      if (contentInfo.data.delivery_mode === 'redirect') {
+        if (!contentInfo.data.url) {
+          throw new Error('video redirect URL unavailable')
+        }
+        if (tab) {
+          tab.location.href = contentInfo.data.url
+        } else {
+          window.open(contentInfo.data.url, '_blank', 'noopener')
+        }
+        return
+      }
+
+      const response = await downloadTaskVideo(log.task_id)
+      const url = URL.createObjectURL(response.data)
+      if (tab) {
+        tab.location.href = url
+      } else {
+        window.open(url, '_blank', 'noopener')
+      }
+      // The blob URL must outlive this call: the new tab reads it after this
+      // function returns, so it is released on a timer rather than here.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch {
+      tab?.close()
+      toast.error(t('Failed to open video'))
+    } finally {
+      setVideoOpening(false)
+    }
+  }
 
   const handleRequestBody = async () => {
     setRequestBodyOpen(true)
@@ -195,16 +241,22 @@ export function TaskLogDetailsCell({
     <div className='flex max-w-[220px] flex-col items-start gap-1'>
       {canDownloadVideo ? (
         <>
-          <a
-            href={videoLink}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='group flex max-w-full items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400'
+          <Button
+            type='button'
+            variant='ghost'
+            size='xs'
+            className='text-blue-600 hover:underline dark:text-blue-400'
+            disabled={videoOpening}
+            onClick={handleVideoOpen}
             title={videoLink}
           >
-            <ExternalLink data-icon='inline-start' />
+            {videoOpening ? (
+              <Spinner data-icon='inline-start' />
+            ) : (
+              <ExternalLink data-icon='inline-start' />
+            )}
             <span className='truncate'>{t('Open video')}</span>
-          </a>
+          </Button>
           <Button
             type='button'
             variant='ghost'

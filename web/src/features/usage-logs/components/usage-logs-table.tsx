@@ -28,6 +28,7 @@ import {
   useDataTable,
 } from '@/components/data-table'
 import { useMediaQuery } from '@/hooks'
+import { useAuthStore } from '@/stores/auth-store'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { cn } from '@/lib/utils'
 
@@ -80,6 +81,11 @@ interface UsageLogsTableProps {
 export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const { t } = useTranslation()
   const { isAdminView: isAdmin } = useLogsViewScope()
+  // A reseller's self log scope already includes every customer they own, so
+  // the table only needs the customer column to make the rows distinguishable.
+  const isReseller = useAuthStore(
+    (state) => state.auth.user?.reseller_enabled === true
+  )
   const isMobile = useMediaQuery('(max-width: 640px)')
   const searchParams = route.useSearch()
 
@@ -157,7 +163,11 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const logs = data?.items || []
-  const columns = useColumnsByCategory(logCategory, isAdmin)
+  const columns = useColumnsByCategory(
+    logCategory,
+    isAdmin,
+    isReseller && !isAdmin
+  )
   const isLoadingData = isLoading || (isFetching && !data)
 
   const { table } = useDataTable({

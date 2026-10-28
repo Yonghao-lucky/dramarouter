@@ -865,6 +865,38 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {/* Reseller profit on this exact request. The backend only attaches it
+            when the caller owns the customer and a settled snapshot exists, so
+            the mere presence of the field means the reseller earned on it. */}
+        {props.log.reseller_margin_quota != null && (
+          <DetailSection label={t('My profit')}>
+            <DetailRow
+              label={t('Profit')}
+              value={formatLogQuota(props.log.reseller_margin_quota)}
+              mono
+            />
+            <DetailRow
+              label={t('Customer paid')}
+              value={formatLogQuota(props.log.revenue_quota ?? props.log.quota)}
+              mono
+            />
+            {props.log.reseller_retail_ratio && (
+              <DetailRow
+                label={t('Customer ratio')}
+                value={props.log.reseller_retail_ratio}
+                mono
+              />
+            )}
+            {props.log.reseller_cost_ratio && (
+              <DetailRow
+                label={t('My cost ratio')}
+                value={props.log.reseller_cost_ratio}
+                mono
+              />
+            )}
+          </DetailSection>
+        )}
+
         {/* Quota saturation marker (admin only) */}
         {props.isAdmin && other?.admin_info?.quota_saturation && (
           <DetailSection

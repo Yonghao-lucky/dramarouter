@@ -83,6 +83,13 @@ type Log struct {
 	RevenueQuota      *int64 `json:"revenue_quota,omitempty" gorm:"-"`
 	CostQuota         *int64 `json:"cost_quota,omitempty" gorm:"-"`
 	ProfitQuota       *int64 `json:"profit_quota,omitempty" gorm:"-"`
+	// Reseller evidence for one charge, shown only to the reseller that owns the
+	// customer who made the request. It is derived from the cost accounting
+	// snapshot the billing path wrote for this exact log, never recomputed from
+	// current prices.
+	ResellerMarginQuota *int64  `json:"reseller_margin_quota,omitempty" gorm:"-"`
+	ResellerRetailRatio *string `json:"reseller_retail_ratio,omitempty" gorm:"-"`
+	ResellerCostRatio   *string `json:"reseller_cost_ratio,omitempty" gorm:"-"`
 }
 
 // don't use iota, avoid change log type value
@@ -637,18 +644,32 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 const logSearchCountLimit = 10000
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, includeAccounting bool) (logs []*Log, total int64, err error) {
+	return GetUserLogsForUsers([]int{userId}, logType, startTimestamp, endTimestamp, modelName, tokenName, startIdx, num, group, requestId, upstreamRequestId, includeAccounting)
+}
+
+// GetUserLogsForUsers pages the logs of a set of users. A reseller reads it with
+// their own id plus every customer they own, so the customer logs appear in the
+// same self log view as their own usage rather than a separate console table.
+func GetUserLogsForUsers(userIds []int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, includeAccounting bool) (logs []*Log, total int64, err error) {
+	if len(userIds) == 0 {
+		return []*Log{}, 0, nil
+	}
+	scope := CostAccountingFilter{userIDs: userIds, LogType: logType, StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ModelName: modelName, TokenName: tokenName, RequestID: requestId, UpstreamRequestID: upstreamRequestId}
+	if len(userIds) == 1 {
+		scope.UserID = userIds[0]
+	}
 	var adjustments []billingEffectiveLog
 	if group != "" {
-		adjustments, err = billingEffectiveLogs(context.Background(), CostAccountingFilter{UserID: userId, LogType: logType, StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ModelName: modelName, TokenName: tokenName, RequestID: requestId, UpstreamRequestID: upstreamRequestId})
+		adjustments, err = billingEffectiveLogs(context.Background(), scope)
 		if err != nil {
 			return nil, 0, err
 		}
 	}
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
-		tx = LOG_DB.Where("logs.user_id = ?", userId)
+		tx = LOG_DB.Where("logs.user_id IN ?", userIds)
 	} else {
-		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
+		tx = LOG_DB.Where("logs.user_id IN ? and logs.type = ?", userIds, logType)
 	}
 	// Enforce admin-only correction visibility in the query, including counts
 	// and explicit type/request-id filters. Hiding a badge in the UI is insufficient.
@@ -735,6 +756,8 @@ func applyLogStatisticsFilter(tx *gorm.DB, filter CostAccountingFilter) (*gorm.D
 	}
 	if filter.UserID != 0 {
 		tx = tx.Where("user_id = ?", filter.UserID)
+	} else if len(filter.userIDs) > 0 {
+		tx = tx.Where("user_id IN ?", filter.userIDs)
 	}
 	var err error
 	if tx, err = applyExplicitLogTextFilter(tx, "username", filter.Username); err != nil {

@@ -289,7 +289,10 @@ function buildTypeDetailSegments(
   return segments
 }
 
-export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
+export function useCommonLogsColumns(
+  isAdmin: boolean,
+  showCustomers = false
+): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<UsageLog>[] = [
     {
@@ -539,6 +542,31 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         },
       }
     )
+  }
+
+  // A reseller reads their customers' usage in the same self log view. The
+  // customer name is the only extra column they need: channel identity and
+  // admin fields stay invisible to them.
+  if (showCustomers && !isAdmin) {
+    columns.push({
+      id: 'customer',
+      header: t('Customer'),
+      accessorFn: (row) => row.username,
+      cell: ({ row }) => {
+        const log = row.original
+        if (!log.username) return null
+        return (
+          <span
+            className='text-muted-foreground block max-w-[140px] truncate text-xs'
+            title={log.username}
+          >
+            {log.username}
+          </span>
+        )
+      },
+      size: 140,
+      maxSize: 160,
+    })
   }
 
   columns.push({

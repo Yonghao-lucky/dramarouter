@@ -160,6 +160,10 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
   const retailByGroup = new Map(
     (book.data?.defaults ?? []).map((row) => [row.group, row.ratio])
   )
+  // The platform ratio is what the platform itself charges for the group. It is
+  // the reference point when deciding a wholesale price, so it sits next to the
+  // columns being edited rather than on another page.
+  const platformByGroup = book.data?.platform_ratios ?? {}
 
   return (
     <div className='flex flex-col gap-4'>
@@ -174,6 +178,7 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
             <TableHeader>
               <TableRow>
                 <TableHead>{t('Group')}</TableHead>
+                <TableHead>{t('Platform ratio')}</TableHead>
                 <TableHead>{t('Wholesale')}</TableHead>
                 <TableHead>{t('Set wholesale')}</TableHead>
                 <TableHead>{t('Retail')}</TableHead>
@@ -184,6 +189,9 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
               {groupNames.map((group) => (
                 <TableRow key={group}>
                   <TableCell>{group}</TableCell>
+                  <TableCell className='text-muted-foreground tabular-nums'>
+                    {platformByGroup[group] ?? '-'}
+                  </TableCell>
                   <TableCell className='tabular-nums'>
                     {costByGroup.get(group) ?? '-'}
                   </TableCell>

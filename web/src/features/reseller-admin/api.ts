@@ -51,6 +51,8 @@ export interface ResellerBook {
     ratio: string
     updated_at: number
   }[]
+  /** The platform's own ratio per group: what an ordinary account pays. */
+  platform_ratios?: Record<string, number>
 }
 
 export interface AdminResellerCustomer {

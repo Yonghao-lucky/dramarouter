@@ -201,7 +201,14 @@ func AdminResellerPriceBook(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"costs": costs, "defaults": defaults}})
+	// The platform's own group ratio is the reference an administrator needs
+	// when deciding a wholesale price or a standing retail price: it is what an
+	// ordinary account pays for that group. It is read-only here.
+	platform := map[string]float64{}
+	for group, ratio := range ratio_setting.GetGroupRatioCopy() {
+		platform[group] = ratio
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"costs": costs, "defaults": defaults, "platform_ratios": platform}})
 }
 
 // AdminResellerCustomers lists the customers owned by one reseller.

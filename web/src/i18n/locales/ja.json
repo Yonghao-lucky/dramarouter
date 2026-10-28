@@ -8847,6 +8847,12 @@
     "Add balance": "Add balance",
     "The user id is an existing platform account; enabling only adds the reseller capability.": "The user id is an existing platform account; enabling only adds the reseller capability.",
     "Top-ups": "Top-ups",
-    "The default customer price is the platform group price. Set your own price only where you want a different one; the others stay at the platform price.": "顧客価格の既定値はプラットフォームのグループ価格です。別の価格にしたい場合だけ個別に設定してください。それ以外はプラットフォーム価格のままです。"
+    "The default customer price is the platform group price. Set your own price only where you want a different one; the others stay at the platform price.": "顧客価格の既定値はプラットフォームのグループ価格です。別の価格にしたい場合だけ個別に設定してください。それ以外はプラットフォーム価格のままです。",
+    "My profit": "My profit",
+    "Customer paid": "Customer paid",
+    "Customer ratio": "Customer ratio",
+    "My cost ratio": "My cost ratio",
+    "Platform ratio": "Platform ratio",
+    "Failed to open video": "Failed to open video"
   }
 }

@@ -47,8 +47,16 @@ func GetUserLogs(c *gin.Context) {
 	group := c.Query("group")
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
-	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, canViewFinancialAccounting(c))
+	// A reseller watches their customers through the same self log view as any
+	// ordinary account: the scope is the caller plus every customer they own,
+	// not a separate console table with its own columns and filters.
+	userIds, resellerId := resellerLogScope(userId)
+	logs, total, err := model.GetUserLogsForUsers(userIds, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, canViewFinancialAccounting(c))
 	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.AttachResellerLogMargins(resellerId, logs); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -56,6 +64,21 @@ func GetUserLogs(c *gin.Context) {
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+// resellerLogScope widens the caller's log scope to the customers they own.
+// It returns the reseller id as the margin owner, or 0 when the caller is an
+// ordinary account, in which case the scope stays the single caller id.
+func resellerLogScope(userId int) ([]int, int) {
+	profile, err := model.GetEnabledResellerProfile(userId)
+	if err != nil || profile == nil {
+		return []int{userId}, 0
+	}
+	customerIds, err := model.ListResellerCustomerIDs(userId)
+	if err != nil || len(customerIds) == 0 {
+		return []int{userId}, 0
+	}
+	return append([]int{userId}, customerIds...), userId
 }
 
 // Deprecated: SearchAllLogs 已废弃，前端未使用该接口。

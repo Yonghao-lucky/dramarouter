@@ -36,6 +36,11 @@ export const usageLogSchema = z.object({
   revenue_quota: z.number().optional(),
   cost_quota: z.number().optional(),
   profit_quota: z.number().optional(),
+  // Present only when the log belongs to a reseller's customer and the caller
+  // is that reseller. Derived from the settled snapshot, not recomputed.
+  reseller_margin_quota: z.number().optional(),
+  reseller_retail_ratio: z.string().optional(),
+  reseller_cost_ratio: z.string().optional(),
   prompt_tokens: z.number().default(0),
   completion_tokens: z.number().default(0),
   use_time: z.number().default(0),
