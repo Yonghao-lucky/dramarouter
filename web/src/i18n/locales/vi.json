@@ -8825,6 +8825,27 @@
     "Margin is not paid out automatically. It stays pending until you credit it.": "Margin is not paid out automatically. It stays pending until you credit it.",
     "Credited {{amount}} to your wallet": "Credited {{amount}} to your wallet",
     "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.": "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.",
-    "Credit it from the Profit tab": "Credit it from the Profit tab"
+    "Credit it from the Profit tab": "Credit it from the Profit tab",
+    "Resellers": "Resellers",
+    "Total wallet": "Total wallet",
+    "Total customers": "Total customers",
+    "Unpaid credit": "Unpaid credit",
+    "Pre-authorized credit not yet paid for": "Pre-authorized credit not yet paid for",
+    "Earned margin still inside reseller wallets": "Earned margin still inside reseller wallets",
+    "Customer balance": "Customer balance",
+    "Grants": "Grants",
+    "Last activity": "Last activity",
+    "Precredit": "Precredit",
+    "Top up": "Top up",
+    "Balance added": "Balance added",
+    "Add balance to {{name}}": "Add balance to {{name}}",
+    "Amount (USD)": "Amount (USD)",
+    "Grant type": "Grant type",
+    "Pre-credit": "Pre-credit",
+    "Recharge means the reseller has already paid; pre-credit means the platform fronts the balance before payment arrives.": "Recharge means the reseller has already paid; pre-credit means the platform fronts the balance before payment arrives.",
+    "Remark (optional)": "Remark (optional)",
+    "Add balance": "Add balance",
+    "The user id is an existing platform account; enabling only adds the reseller capability.": "The user id is an existing platform account; enabling only adds the reseller capability.",
+    "Top-ups": "Top-ups"
   }
 }

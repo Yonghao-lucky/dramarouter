@@ -67,6 +67,37 @@ export interface AdminResellerCustomer {
   last_activity_at: number
 }
 
+export interface ResellerOverviewRow {
+  reseller_id: number
+  username: string
+  display_name: string
+  name: string
+  code: string
+  status: number
+  wallet_quota: number
+  customer_count: number
+  customer_balance_quota: number
+  funded_quota: number
+  revenue_quota: number
+  margin_quota: number
+  pending_margin_quota: number
+  granted_recharge_quota: number
+  granted_precredit_quota: number
+  last_activity_at: number
+  created_at: number
+}
+
+export interface ResellerWalletGrant {
+  id: number
+  event_key: string
+  reseller_id: number
+  amount: number
+  kind: 'recharge' | 'precredit'
+  remark: string
+  operator_id: number
+  created_at: number
+}
+
 function unwrap<T>(response: Response<T>): T {
   if (!response.success) {
     throw new Error(response.message || 'Something went wrong!')
@@ -175,6 +206,44 @@ export async function transferResellerQuota(payload: {
 
 export async function getGroups() {
   return unwrap((await api.get<Response<string[]>>('/api/group/')).data)
+}
+
+export async function listResellerOverviews() {
+  return unwrap(
+    (
+      await api.get<Response<ResellerOverviewRow[]>>(
+        '/api/user/reseller/overview'
+      )
+    ).data
+  )
+}
+
+export async function listResellerGrants(resellerId: number, limit = 50) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerWalletGrant[]>>(
+        '/api/user/reseller/grants',
+        { params: { reseller_id: resellerId, limit } }
+      )
+    ).data
+  )
+}
+
+export async function grantResellerWallet(payload: {
+  reseller_id: number
+  quota: number
+  kind: 'recharge' | 'precredit'
+  remark?: string
+  event_key?: string
+}) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerWalletGrant>>(
+        '/api/user/reseller/grant',
+        payload
+      )
+    ).data
+  )
 }
 
 export { ROLE }

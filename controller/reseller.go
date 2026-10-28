@@ -129,6 +129,65 @@ func AdminListResellers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": profiles})
 }
 
+// AdminResellerOverview returns every reseller with the wallet, customer and
+// margin figures the administrator needs to manage them, in one request.
+func AdminResellerOverview(c *gin.Context) {
+	rows, err := model.ListResellerOverviews()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
+}
+
+type resellerGrantRequest struct {
+	ResellerId int    `json:"reseller_id"`
+	Quota      int64  `json:"quota"`
+	Kind       string `json:"kind"`
+	Remark     string `json:"remark"`
+	EventKey   string `json:"event_key"`
+}
+
+// AdminGrantResellerWallet tops up a reseller wallet and records whether the
+// money was paid (recharge) or granted ahead of payment (pre-credit), plus who
+// did it and why. The event key makes a retried click a no-op.
+func AdminGrantResellerWallet(c *gin.Context) {
+	var req resellerGrantRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil || req.ResellerId <= 0 {
+		common.ApiErrorMsg(c, "invalid reseller grant")
+		return
+	}
+	if req.EventKey == "" {
+		req.EventKey = common.NewRequestId()
+	}
+	grant, err := model.GrantResellerWallet(req.ResellerId, c.GetInt("id"), req.Quota, req.Kind, req.Remark, req.EventKey)
+	if err != nil {
+		if errors.Is(err, model.ErrResellerGrantInvalid) || errors.Is(err, model.ErrResellerGrantReplay) {
+			common.ApiErrorMsg(c, err.Error())
+			return
+		}
+		writeResellerError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": grant})
+}
+
+// AdminResellerGrants lists one reseller's top-up history.
+func AdminResellerGrants(c *gin.Context) {
+	resellerId, err := strconv.Atoi(c.Query("reseller_id"))
+	if err != nil || resellerId <= 0 {
+		common.ApiErrorMsg(c, "invalid reseller id")
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	rows, err := model.ListResellerWalletGrants(resellerId, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
+}
+
 // AdminResellerPriceBook returns one reseller's wholesale cost book and standing
 // retail prices for the administration view.
 func AdminResellerPriceBook(c *gin.Context) {

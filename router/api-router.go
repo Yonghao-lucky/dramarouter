@@ -246,6 +246,9 @@ func SetApiRouter(router *gin.Engine) {
 
 				// Reseller administration and the per-user, per-group price override.
 				adminRoute.GET("/reseller/profiles", controller.AdminListResellers)
+				adminRoute.GET("/reseller/overview", controller.AdminResellerOverview)
+				adminRoute.GET("/reseller/grants", controller.AdminResellerGrants)
+				adminRoute.POST("/reseller/grant", controller.AdminGrantResellerWallet)
 				adminRoute.GET("/reseller/book", controller.AdminResellerPriceBook)
 				adminRoute.GET("/reseller/customers", controller.AdminResellerCustomers)
 				adminRoute.PUT("/reseller/profile", controller.AdminUpsertReseller)

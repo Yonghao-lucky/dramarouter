@@ -17,12 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -39,15 +38,21 @@ import {
   getGroups,
   getResellerBook,
   getResellerCustomers,
+  listResellerGrants,
+  listResellerOverviews,
   listResellerProfiles,
   setCustomerGroupPrice,
   setCustomerOwner,
   setResellerCost,
   setResellerDefaultPrice,
   transferResellerQuota,
+  type ResellerOverviewRow,
   type ResellerProfile,
   upsertResellerProfile,
 } from './api'
+import { GrantDialog } from './grant-dialog'
+import { GrantsTable } from './grants-table'
+import { OverviewPanel } from './overview-panel'
 
 const QUOTA_PER_UNIT = 500000
 
@@ -55,17 +60,17 @@ function formatQuota(value: number) {
   return (value / QUOTA_PER_UNIT).toFixed(4)
 }
 
-function ProfileBook({ profile }: { profile: ResellerProfile }) {
+function ProfileBook({ resellerId }: { resellerId: number }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const groups = useQuery({ queryKey: ['groups'], queryFn: getGroups })
   const book = useQuery({
-    queryKey: ['reseller-admin', 'book', profile.id],
-    queryFn: () => getResellerBook(profile.id),
+    queryKey: ['reseller-admin', 'book', resellerId],
+    queryFn: () => getResellerBook(resellerId),
   })
   const customers = useQuery({
-    queryKey: ['reseller-admin', 'customers', profile.id],
-    queryFn: () => getResellerCustomers(profile.id),
+    queryKey: ['reseller-admin', 'customers', resellerId],
+    queryFn: () => getResellerCustomers(resellerId),
   })
   const [costDrafts, setCostDrafts] = useState<Record<string, string>>({})
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
@@ -83,7 +88,7 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
   const saveCost = useMutation({
     mutationFn: (group: string) =>
       setResellerCost({
-        reseller_id: profile.id,
+        reseller_id: resellerId,
         group,
         ratio: costDrafts[group] ?? '',
         enabled: true,
@@ -98,7 +103,7 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
   const savePrice = useMutation({
     mutationFn: (group: string) =>
       setResellerDefaultPrice({
-        reseller_id: profile.id,
+        reseller_id: resellerId,
         group,
         ratio: priceDrafts[group] ?? '',
       }),
@@ -126,7 +131,7 @@ function ProfileBook({ profile }: { profile: ResellerProfile }) {
   const saveAllocation = useMutation({
     mutationFn: (payload: { userId: number; direction: 'fund' | 'reclaim' }) =>
       transferResellerQuota({
-        reseller_id: profile.user_id,
+        reseller_id: resellerId,
         customer_user_id: payload.userId,
         direction: payload.direction,
         retail_quota: Number(allocationDrafts[payload.userId] ?? 0),
@@ -377,11 +382,39 @@ export function ResellerAdmin() {
     queryKey: ['reseller-admin', 'profiles'],
     queryFn: listResellerProfiles,
   })
-  const [selected, setSelected] = useState<ResellerProfile | null>(null)
+  const overview = useQuery({
+    queryKey: ['reseller-admin', 'overview'],
+    queryFn: listResellerOverviews,
+  })
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [topUp, setTopUp] = useState<{
+    resellerId: number
+    label: string
+  } | null>(null)
   const [userId, setUserId] = useState('')
   const [name, setName] = useState('')
 
-  const grant = useMutation({
+  const selected = useMemo(
+    () =>
+      (overview.data ?? []).find((row) => row.reseller_id === selectedId) ??
+      null,
+    [overview.data, selectedId]
+  )
+  const selectedProfile = useMemo(
+    () =>
+      (profiles.data ?? []).find((row) => row.user_id === selectedId) ?? null,
+    [profiles.data, selectedId]
+  )
+  const grants = useQuery({
+    queryKey: ['reseller-admin', 'grants', selectedId],
+    queryFn: () => listResellerGrants(selectedId as number),
+    enabled: selectedId != null,
+  })
+
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: ['reseller-admin'] })
+
+  const enable = useMutation({
     mutationFn: () =>
       upsertResellerProfile({
         user_id: Number(userId),
@@ -392,12 +425,12 @@ export function ResellerAdmin() {
       toast.success(t('Reseller enabled'))
       setUserId('')
       setName('')
-      void queryClient.invalidateQueries({ queryKey: ['reseller-admin'] })
+      void refresh()
     },
     onError: (error: Error) => toast.error(error.message),
   })
 
-  const disable = useMutation({
+  const toggleStatus = useMutation({
     mutationFn: (profile: ResellerProfile) =>
       upsertResellerProfile({
         user_id: profile.user_id,
@@ -406,10 +439,13 @@ export function ResellerAdmin() {
       }),
     onSuccess: () => {
       toast.success(t('Reseller status updated'))
-      void queryClient.invalidateQueries({ queryKey: ['reseller-admin'] })
+      void refresh()
     },
     onError: (error: Error) => toast.error(error.message),
   })
+
+  const labelOf = (row: ResellerOverviewRow) =>
+    row.display_name || row.name || row.username || `#${row.reseller_id}`
 
   return (
     <SectionPageLayout>
@@ -418,95 +454,88 @@ export function ResellerAdmin() {
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='flex flex-col gap-4'>
-          <div className='flex flex-wrap items-end gap-2'>
-            <Input
-              className='w-32'
-              placeholder={t('User ID')}
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-            />
-            <Input
-              className='w-48'
-              placeholder={t('Display name')}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-            <Button
-              disabled={!userId || grant.isPending}
-              onClick={() => grant.mutate()}
-            >
-              {t('Enable reseller')}
-            </Button>
-          </div>
-
           <Card>
-            <CardContent className='pt-4'>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('Reseller')}</TableHead>
-                    <TableHead>{t('User ID')}</TableHead>
-                    <TableHead>{t('Status')}</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(profiles.data ?? []).map((profile) => (
-                    <TableRow key={profile.id}>
-                      <TableCell>
-                        {profile.name || profile.code || '-'}
-                      </TableCell>
-                      <TableCell>#{profile.user_id}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            profile.status === 2 ? 'default' : 'secondary'
-                          }
-                        >
-                          {profile.status === 2 ? t('Enabled') : t('Disabled')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className='flex items-center gap-2'>
-                          <Button
-                            size='sm'
-                            variant='outline'
-                            onClick={() => setSelected(profile)}
-                          >
-                            {t('Manage')}
-                          </Button>
-                          <Button
-                            size='sm'
-                            variant='ghost'
-                            onClick={() => disable.mutate(profile)}
-                          >
-                            {profile.status === 2 ? t('Disable') : t('Enable')}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {(profiles.data ?? []).length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className='text-muted-foreground text-center text-sm'
-                      >
-                        {t('No resellers yet')}
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
+            <CardHeader className='pb-2'>
+              <CardTitle className='text-sm'>{t('Enable reseller')}</CardTitle>
+            </CardHeader>
+            <CardContent className='flex flex-wrap items-end gap-2'>
+              <Input
+                className='w-32'
+                placeholder={t('User ID')}
+                value={userId}
+                onChange={(event) => setUserId(event.target.value)}
+              />
+              <Input
+                className='w-48'
+                placeholder={t('Display name')}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+              <Button
+                disabled={!userId || enable.isPending}
+                onClick={() => enable.mutate()}
+              >
+                {enable.isPending ? t('Saving') : t('Enable reseller')}
+              </Button>
+              <span className='text-muted-foreground text-xs'>
+                {t(
+                  'The user id is an existing platform account; enabling only adds the reseller capability.'
+                )}
+              </span>
             </CardContent>
           </Card>
 
+          <OverviewPanel
+            rows={overview.data ?? []}
+            loading={overview.isPending}
+            selectedId={selectedId}
+            onSelect={(resellerId) =>
+              setSelectedId((current) =>
+                current === resellerId ? null : resellerId
+              )
+            }
+            onTopUp={(row) =>
+              setTopUp({ resellerId: row.reseller_id, label: labelOf(row) })
+            }
+          />
+
+          <GrantDialog
+            open={topUp != null}
+            resellerId={topUp?.resellerId ?? null}
+            resellerLabel={topUp?.label ?? ''}
+            onClose={() => setTopUp(null)}
+            onGranted={() => void refresh()}
+          />
+
           {selected ? (
             <div className='flex flex-col gap-3'>
-              <div className='text-sm font-medium'>
-                {t('Managing')}: {selected.name || `#${selected.user_id}`}
+              <div className='flex flex-wrap items-center gap-2'>
+                <span className='text-sm font-medium'>
+                  {t('Managing')}: {labelOf(selected)} · #{selected.reseller_id}
+                </span>
+                {selectedProfile ? (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={toggleStatus.isPending}
+                    onClick={() => toggleStatus.mutate(selectedProfile)}
+                  >
+                    {selectedProfile.status === 2 ? t('Disable') : t('Enable')}
+                  </Button>
+                ) : null}
               </div>
-              <ProfileBook profile={selected} />
+              <Card>
+                <CardHeader className='pb-2'>
+                  <CardTitle className='text-sm'>{t('Top-ups')}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <GrantsTable
+                    grants={grants.data ?? []}
+                    loading={grants.isPending}
+                  />
+                </CardContent>
+              </Card>
+              <ProfileBook resellerId={selected.reseller_id} />
             </div>
           ) : null}
         </div>

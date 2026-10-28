@@ -8825,6 +8825,27 @@
     "Margin is not paid out automatically. It stays pending until you credit it.": "利潤不會自動打回錢包，需要你手動充回。",
     "Credited {{amount}} to your wallet": "已充回錢包 {{amount}}",
     "Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.": "充值按 1:1 從你的錢包劃入客戶錢包。你的利潤來自零售價與批發價的差額，會在「利潤」頁作為待提現利潤累積，由你手動充回錢包。",
-    "Credit it from the Profit tab": "在「利潤」頁充回錢包"
+    "Credit it from the Profit tab": "在「利潤」頁充回錢包",
+    "Resellers": "經銷商",
+    "Total wallet": "錢包總額",
+    "Total customers": "客戶總數",
+    "Unpaid credit": "未付款額度",
+    "Pre-authorized credit not yet paid for": "平臺先行給出的預授信額度",
+    "Earned margin still inside reseller wallets": "仍在經銷商錢包中的已賺利潤",
+    "Customer balance": "客戶餘額",
+    "Grants": "充值記錄",
+    "Last activity": "最近活動",
+    "Precredit": "預授信",
+    "Top up": "充值",
+    "Balance added": "餘額已新增",
+    "Add balance to {{name}}": "為 {{name}} 新增餘額",
+    "Amount (USD)": "金額（美元）",
+    "Grant type": "型別",
+    "Pre-credit": "預授信",
+    "Recharge means the reseller has already paid; pre-credit means the platform fronts the balance before payment arrives.": "「已充值」表示經銷商已付款；「預授信」表示平臺先給額度、款項後到。",
+    "Remark (optional)": "備註（選填）",
+    "Add balance": "新增餘額",
+    "The user id is an existing platform account; enabling only adds the reseller capability.": "該使用者 ID 必須是平臺上已存在的賬號，開啟只是給它附加經銷商能力。",
+    "Top-ups": "充值記錄"
   }
 }
