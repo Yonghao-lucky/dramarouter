@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"gorm.io/gorm"
 )
 
@@ -327,6 +328,11 @@ type ResellerPlatformGroupRow struct {
 	CostRatio string `json:"cost_ratio"`
 	Ratio     string `json:"ratio"`
 	Source    string `json:"source"`
+	// PlatformRatio is the ratio the platform charges an ordinary account for
+	// this group. It is the default customer price: a customer who is never
+	// priced by the reseller pays exactly what the platform charges, so the
+	// console must not prefill the reseller's own wholesale cost there.
+	PlatformRatio string `json:"platform_ratio"`
 	// Sellable is false for a group without an enabled wholesale cost. Such a
 	// group is still usable by the customer, but the reseller earns nothing on
 	// it and cannot set a price floor there.
@@ -404,13 +410,22 @@ func ResellerPlatformGroups(resellerUserId, customerUserId int) ([]ResellerPlatf
 			}
 		}
 		row.Sellable = row.CostRatio != ""
+		// The platform ratio is what an ordinary account pays here, and therefore
+		// the standing customer price when the reseller sets no price of its own.
+		// Prefilling the reseller's cost instead would show the customer the
+		// wholesale price and earn the reseller nothing.
+		if ratio_setting.ContainsGroupRatio(name) {
+			if platformRatio := ratio_setting.GetGroupRatio(name); platformRatio > 0 {
+				row.PlatformRatio = strconv.FormatFloat(platformRatio, 'f', -1, 64)
+			}
+		}
 		switch {
 		case overrideByGroup[name] != "":
 			row.Ratio, row.Source = overrideByGroup[name], "customer"
 		case defaultByGroup[name] != "":
 			row.Ratio, row.Source = defaultByGroup[name], "reseller_default"
-		case row.CostRatio != "":
-			row.Ratio, row.Source = row.CostRatio, "cost"
+		case row.PlatformRatio != "":
+			row.Ratio, row.Source = row.PlatformRatio, "platform"
 		default:
 			row.Source = "platform"
 		}

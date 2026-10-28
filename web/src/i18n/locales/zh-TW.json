@@ -8846,6 +8846,7 @@
     "Remark (optional)": "備註（選填）",
     "Add balance": "新增餘額",
     "The user id is an existing platform account; enabling only adds the reseller capability.": "該使用者 ID 必須是平臺上已存在的賬號，開啟只是給它附加經銷商能力。",
-    "Top-ups": "充值記錄"
+    "Top-ups": "充值記錄",
+    "The default customer price is the platform group price. Set your own price only where you want a different one; the others stay at the platform price.": "客戶價格預設就是平台的分組價格。只有你想定不同的價格時才單獨設定，其餘分組保持平台價。"
   }
 }

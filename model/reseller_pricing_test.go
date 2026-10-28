@@ -96,7 +96,12 @@ func TestResellerPlatformGroupsListsEveryPlatformGroup(t *testing.T) {
 	require.True(t, ok, "a platform group outside the price book must still be listed")
 	assert.True(t, platform.Sellable, "a platform group has a platform cost, so it is sellable")
 	assert.NotEmpty(t, platform.CostRatio)
-	assert.Equal(t, "cost", platform.Source)
+	// The standing customer price is the platform's own group price, never the
+	// reseller's wholesale cost: prefilling the cost would show the customer the
+	// reseller's purchase price and leave the reseller no spread to sell on.
+	assert.Equal(t, "platform", platform.Source)
+	assert.NotEmpty(t, platform.PlatformRatio, "the platform ratio is the standing customer price")
+	assert.Equal(t, platform.PlatformRatio, platform.Ratio)
 }
 
 func TestResellerMarginQuotaArithmetic(t *testing.T) {

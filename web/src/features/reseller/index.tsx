@@ -214,7 +214,7 @@ function CustomerDetailDialog(props: {
       open={props.customerId != null}
       onOpenChange={() => props.onClose()}
     >
-      <DialogContent className='max-h-[85vh] max-w-4xl overflow-y-auto'>
+      <DialogContent className='h-[92vh] max-h-[92vh] w-[96vw] max-w-[1200px] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden sm:max-w-[1200px]'>
         <DialogHeader>
           <DialogTitle>
             {data
@@ -224,7 +224,7 @@ function CustomerDetailDialog(props: {
         </DialogHeader>
 
         {data ? (
-          <div className='flex flex-col gap-5'>
+          <div className='flex min-h-0 flex-col gap-4 overflow-y-auto pr-1'>
             <div className='grid gap-3 sm:grid-cols-4'>
               <StatCard
                 title={t('Wallet')}
@@ -273,149 +273,161 @@ function CustomerDetailDialog(props: {
                 >
                   {t('Reclaim')}
                 </Button>
+                <p className='text-muted-foreground basis-full text-xs'>
+                  {t(
+                    'Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.'
+                  )}
+                </p>
               </div>
-              <p className='text-muted-foreground mt-2 text-xs'>
-                {t(
-                  'Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.'
-                )}
-              </p>
             </div>
 
-            <div>
-              <div className='mb-1 text-sm font-medium'>
-                {t('Group pricing')}
-              </div>
-              <p className='text-muted-foreground mb-2 text-xs'>
-                {t(
-                  'A customer may call any group with their key. You earn the spread only on groups where you have a wholesale cost; the others still work for the customer at the platform price.'
-                )}
-              </p>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('Group')}</TableHead>
-                    <TableHead>{t('My cost')}</TableHead>
-                    <TableHead>{t('Customer price')}</TableHead>
-                    <TableHead>{t('Margin')}</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(groups.data ?? []).map((group) => {
-                    const retail = Number(priceDrafts[group.group] || group.ratio)
-                    const cost = Number(group.cost_ratio)
-                    const margin =
-                      retail > 0 && cost > 0
-                        ? `${(((retail - cost) / retail) * 100).toFixed(1)}%`
-                        : '—'
-                    return (
-                      <TableRow key={group.group}>
-                        <TableCell>
-                          <div className='flex items-center gap-1.5'>
-                            <span>{group.group}</span>
-                            {group.group === data.group ? (
-                              <Badge variant='outline'>{t('Current')}</Badge>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className='tabular-nums'>
-                          {group.cost_ratio || '—'}
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            className='w-24'
-                            inputMode='decimal'
-                            placeholder={group.ratio || '—'}
-                            disabled={!group.sellable}
-                            value={priceDrafts[group.group] ?? ''}
-                            onChange={(event) =>
-                              setPriceDrafts((prev) => ({
-                                ...prev,
-                                [group.group]: event.target.value,
-                              }))
-                            }
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' && group.sellable) {
-                                event.preventDefault()
-                                savePrice.mutate(group.group)
-                              }
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell className='text-muted-foreground tabular-nums'>
-                          {group.sellable ? margin : t('No cost set')}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            size='sm'
-                            variant='outline'
-                            disabled={
-                              !group.sellable ||
-                              !priceDrafts[group.group] ||
-                              (savePrice.isPending &&
-                                savePrice.variables === group.group)
-                            }
-                            onClick={() => savePrice.mutate(group.group)}
-                          >
-                            {savePrice.isPending &&
-                            savePrice.variables === group.group
-                              ? t('Saving')
-                              : t('Save')}
-                          </Button>
-                        </TableCell>
+            <div className='grid min-h-0 gap-4 xl:grid-cols-2'>
+              <div className='flex min-h-0 flex-col'>
+                <div className='mb-1 text-sm font-medium'>
+                  {t('Group pricing')}
+                </div>
+                <p className='text-muted-foreground mb-2 text-xs'>
+                  {t(
+                    'The default customer price is the platform group price. Set your own price only where you want a different one; the others stay at the platform price.'
+                  )}
+                </p>
+                <div className='min-h-0 flex-1 overflow-y-auto rounded-lg border'>
+                  <Table>
+                    <TableHeader className='bg-popover sticky top-0 z-10'>
+                      <TableRow>
+                        <TableHead>{t('Group')}</TableHead>
+                        <TableHead>{t('My cost')}</TableHead>
+                        <TableHead>{t('Customer price')}</TableHead>
+                        <TableHead>{t('Margin')}</TableHead>
+                        <TableHead />
                       </TableRow>
-                    )
-                  })}
-                  {(groups.data ?? []).length === 0 ? (
-                    <EmptyRow colSpan={5} />
-                  ) : null}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div>
-              <div className='mb-2 text-sm font-medium'>
-                {t('Recent transfers')}
+                    </TableHeader>
+                    <TableBody>
+                      {(groups.data ?? []).map((group) => {
+                        const retail = Number(
+                          priceDrafts[group.group] || group.ratio
+                        )
+                        const cost = Number(group.cost_ratio)
+                        const margin =
+                          retail > 0 && cost > 0
+                            ? `${(((retail - cost) / retail) * 100).toFixed(1)}%`
+                            : '—'
+                        return (
+                          <TableRow key={group.group}>
+                            <TableCell>
+                              <div className='flex items-center gap-1.5'>
+                                <span>{group.group}</span>
+                                {group.group === data.group ? (
+                                  <Badge variant='outline'>
+                                    {t('Current')}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell className='tabular-nums'>
+                              {group.cost_ratio || '—'}
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                className='w-24'
+                                inputMode='decimal'
+                                placeholder={group.ratio || '—'}
+                                value={priceDrafts[group.group] ?? ''}
+                                onChange={(event) =>
+                                  setPriceDrafts((prev) => ({
+                                    ...prev,
+                                    [group.group]: event.target.value,
+                                  }))
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    savePrice.mutate(group.group)
+                                  }
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell className='text-muted-foreground tabular-nums'>
+                              {margin}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                disabled={
+                                  !priceDrafts[group.group] ||
+                                  (savePrice.isPending &&
+                                    savePrice.variables === group.group)
+                                }
+                                onClick={() => savePrice.mutate(group.group)}
+                              >
+                                {savePrice.isPending &&
+                                savePrice.variables === group.group
+                                  ? t('Saving')
+                                  : t('Save')}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                      {(groups.data ?? []).length === 0 ? (
+                        <EmptyRow colSpan={5} />
+                      ) : null}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('Time')}</TableHead>
-                    <TableHead>{t('Direction')}</TableHead>
-                    <TableHead>{t('Retail')}</TableHead>
-                    <TableHead>{t('Cost')}</TableHead>
-                    <TableHead>{t('Group')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(data.recent_transfers ?? []).map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        {new Date(row.created_at * 1000).toLocaleString()}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            row.direction === 'fund' ? 'default' : 'secondary'
-                          }
-                        >
-                          {row.direction === 'fund' ? t('Fund') : t('Reclaim')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className='tabular-nums'>
-                        {formatQuota(row.retail_quota)}
-                      </TableCell>
-                      <TableCell className='tabular-nums'>
-                        {formatQuota(row.cost_quota)}
-                      </TableCell>
-                      <TableCell>{row.group}</TableCell>
-                    </TableRow>
-                  ))}
-                  {(data.recent_transfers ?? []).length === 0 ? (
-                    <EmptyRow colSpan={5} />
-                  ) : null}
-                </TableBody>
-              </Table>
+
+              <div className='flex min-h-0 flex-col'>
+                <div className='mb-2 text-sm font-medium'>
+                  {t('Recent transfers')}
+                </div>
+                <div className='min-h-0 flex-1 overflow-y-auto rounded-lg border'>
+                  <Table>
+                    <TableHeader className='bg-popover sticky top-0 z-10'>
+                      <TableRow>
+                        <TableHead>{t('Time')}</TableHead>
+                        <TableHead>{t('Direction')}</TableHead>
+                        <TableHead>{t('Retail')}</TableHead>
+                        <TableHead>{t('Cost')}</TableHead>
+                        <TableHead>{t('Group')}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(data.recent_transfers ?? []).map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell>
+                            {new Date(row.created_at * 1000).toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                row.direction === 'fund'
+                                  ? 'default'
+                                  : 'secondary'
+                              }
+                            >
+                              {row.direction === 'fund'
+                                ? t('Fund')
+                                : t('Reclaim')}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className='tabular-nums'>
+                            {formatQuota(row.retail_quota)}
+                          </TableCell>
+                          <TableCell className='tabular-nums'>
+                            {formatQuota(row.cost_quota)}
+                          </TableCell>
+                          <TableCell>{row.group}</TableCell>
+                        </TableRow>
+                      ))}
+                      {(data.recent_transfers ?? []).length === 0 ? (
+                        <EmptyRow colSpan={5} />
+                      ) : null}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             </div>
           </div>
         ) : null}

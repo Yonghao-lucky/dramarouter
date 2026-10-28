@@ -8846,6 +8846,7 @@
     "Remark (optional)": "Remark (optional)",
     "Add balance": "Add balance",
     "The user id is an existing platform account; enabling only adds the reseller capability.": "The user id is an existing platform account; enabling only adds the reseller capability.",
-    "Top-ups": "Top-ups"
+    "Top-ups": "Top-ups",
+    "The default customer price is the platform group price. Set your own price only where you want a different one; the others stay at the platform price.": "Giá khách hàng mặc định là giá nhóm của nền tảng. Chỉ đặt giá riêng ở nơi bạn muốn khác; các nhóm còn lại giữ giá nền tảng."
   }
 }
