@@ -182,7 +182,10 @@ func Distribute() func(c *gin.Context) {
 							abortWithOpenAiMessage(c, http.StatusBadRequest, message, types.ErrorCodeInvalidRequest)
 							return
 						}
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+						// 分组内没有该模型的可选渠道，对客户而言等同于模型不存在：
+						// 这是永久的客户端错误，返回 503 会被当成可重试。分组信息只记日志。
+						logger.LogDebug(c, "no usable channel for model %q in group %q, answering 404", modelRequest.Model, usingGroup)
+						abortWithOpenAiMessage(c, http.StatusNotFound, i18n.T(c, i18n.MsgDistributorModelNotFound, map[string]any{"Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
 				}
