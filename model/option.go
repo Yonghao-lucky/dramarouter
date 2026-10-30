@@ -449,10 +449,17 @@ func UpdateOptionsBulk(values map[string]string) error {
 	for key, value := range values {
 		if strings.HasPrefix(key, "sms.") {
 			common.OptionMap[key] = value
-			handleConfigUpdate(key, value)
 		}
 	}
 	common.OptionMapRWMutex.Unlock()
+	// Same rule as updateOptionMap: release the write lock before the config
+	// subsystem runs. A handler that blocks on another subsystem while this lock
+	// is held wedges every OptionMap reader process-wide.
+	for key, value := range values {
+		if strings.HasPrefix(key, "sms.") {
+			handleConfigUpdate(key, value)
+		}
+	}
 	for k, v := range values {
 		if strings.HasPrefix(k, "sms.") {
 			continue
@@ -481,10 +488,17 @@ func updateOptionMap(key string, value string) (err error) {
 		return nil
 	}
 	common.OptionMapRWMutex.Lock()
-	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
+	common.OptionMapRWMutex.Unlock()
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
+	//
+	// handleConfigUpdate 会进入配置管理器和计费缓存（billing_setting 触发
+	// InvalidatePricingCache），后者需要 updatePricingLock。这两把锁的顺序是
+	// updatePricingLock -> ... -> OptionMap 读锁，因此不能持有 OptionMap 写锁
+	// 调用它：一旦形成环路，所有读取 OptionMap 的接口（/api/status、/api/pricing、
+	// /api/notice 等）都会永久挂起，而 relay 链路因为不读 OptionMap 仍然正常。
+	// 与 refreshPricingAfterOptionChange 的约定一致：写锁释放后再应用副作用。
 	if handleConfigUpdate(key, value) {
 		return nil // 已由配置系统处理
 	}
