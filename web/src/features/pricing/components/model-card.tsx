@@ -31,7 +31,11 @@ import {
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
-import { formatPrice, formatRequestPrice } from '../lib/price'
+import {
+  formatPrice,
+  formatRequestPrice,
+  formatResolutionPrice,
+} from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelImageResolutionBadge } from './model-image-resolution-pricing'
@@ -88,6 +92,26 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     Math.max(endpoints.length - 2, 0) +
     Math.max(tags.length - 2, 0)
 
+  // Per-resolution image models bill one price per generated image. The
+  // cheapest tier is the honest headline; a stale ModelPrice (or a missing one,
+  // which would otherwise render as a token price) must not win here.
+  const cheapestResolutionPrice = formatResolutionPrice(
+    props.model,
+    showRechargePrice,
+    priceRate,
+    usdExchangeRate,
+    props.selectedGroup
+  )
+  const resolutionPriceSummary =
+    cheapestResolutionPrice === null ? null : (
+      <span className='text-muted-foreground whitespace-nowrap'>
+        <span className='text-foreground font-mono font-semibold'>
+          {cheapestResolutionPrice}
+        </span>{' '}
+        {t('Starting at')} · {t('per image')}
+      </span>
+    )
+
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
     copyToClipboard(props.model.model_name || '')
@@ -129,6 +153,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         </span>
       )
     }
+  } else if (resolutionPriceSummary) {
+    priceSummary = resolutionPriceSummary
   } else if (isTokenBased) {
     priceSummary = (
       <>

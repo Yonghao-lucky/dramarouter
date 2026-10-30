@@ -38,6 +38,7 @@ import { isTokenBasedModel } from '../lib/model-helpers'
 import {
   formatPrice,
   formatRequestPrice,
+  formatResolutionPrice,
   stripTrailingZeros,
 } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
@@ -175,6 +176,29 @@ export function usePricingColumns(
         }
 
         const isTokenBased = isTokenBasedModel(model)
+
+        // Per-resolution image models bill one price per generated image, so
+        // the cheapest tier is the honest headline. Checked before the token
+        // branch because these rows carry no usable token ratio.
+        const resolutionPrice = formatResolutionPrice(
+          model,
+          showRechargePrice,
+          priceRate,
+          usdExchangeRate,
+          selectedGroup
+        )
+        if (resolutionPrice !== null) {
+          return (
+            <div className='max-w-full min-w-0'>
+              <span className='font-mono text-sm tabular-nums'>
+                {stripTrailingZeros(resolutionPrice)}
+              </span>
+              <div className='text-muted-foreground/50 text-[10px]'>
+                {t('Starting at')} · {t('per image')}
+              </div>
+            </div>
+          )
+        }
 
         if (isTokenBased) {
           const inputPrice = stripTrailingZeros(

@@ -452,6 +452,12 @@ func updatePricing() {
 			pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
 			pricing.QuotaType = 0
 		}
+		// 分辨率档位计费本质上仍是按次计费：一次请求出一个价。未配置 ModelPrice
+		// 的模型（如只靠 gpt-image-* 通配档位的变体）会被上面的分支判成 token
+		// 计费，广场因此显示「按量计费」并要求输入/输出单价，与实际扣费不符。
+		if ratio_setting.HasImageResolutionPricing(model) {
+			pricing.QuotaType = 1
+		}
 		if cacheRatio, ok := ratio_setting.GetCacheRatio(model); ok {
 			pricing.CacheRatio = &cacheRatio
 		}

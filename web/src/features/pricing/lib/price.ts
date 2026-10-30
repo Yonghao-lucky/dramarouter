@@ -270,3 +270,58 @@ export function formatRequestPrice(
     abbreviate: false,
   })
 }
+
+/**
+ * Cheapest configured resolution tier for a per-image model.
+ * Returns null when the model has no resolution tier table, so callers keep
+ * their ordinary per-request rendering.
+ */
+export function getCheapestResolutionPrice(
+  model: PricingModel
+): number | null {
+  const view = model.image_resolution_pricing
+  if (!view) return null
+
+  const prices: number[] = []
+  for (const tier of view.tiers) {
+    if (Number.isFinite(tier.price) && tier.price > 0) {
+      prices.push(tier.price)
+    }
+  }
+  if (view.default_price && Number.isFinite(view.default_price)) {
+    prices.push(view.default_price)
+  }
+  if (prices.length === 0) return null
+
+  return Math.min(...prices)
+}
+
+/**
+ * Format the cheapest resolution tier through the same group-ratio and
+ * recharge stages the charge itself goes through. Image models bill per
+ * generated image, so the summary reads as a starting price per image.
+ */
+export function formatResolutionPrice(
+  model: PricingModel,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1,
+  selectedGroup?: string
+): string | null {
+  const cheapest = getCheapestResolutionPrice(model)
+  if (cheapest === null) return null
+
+  const groupRatio = getDisplayGroupRatio(model, selectedGroup)
+  const priceInUSD = applyRechargeRate(
+    cheapest * groupRatio,
+    showWithRecharge,
+    priceRate,
+    usdExchangeRate
+  )
+
+  return formatCurrencyFromUSD(priceInUSD, {
+    digitsLarge: 4,
+    digitsSmall: 4,
+    abbreviate: false,
+  })
+}

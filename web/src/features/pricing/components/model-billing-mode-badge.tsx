@@ -34,7 +34,12 @@ export function ModelBillingModeBadge(props: ModelBillingModeBadgeProps) {
   let label = t('Per Request')
   let variant: StatusVariant = 'purple'
 
-  if (isDynamicPricingModel(props.model)) {
+  if (props.model.image_resolution_pricing) {
+    // 按出图尺寸分档计费：一次请求仍出一次价，但单价取决于分辨率，
+    // 说成「按次」会让人以为尺寸不影响价格。
+    label = t('Per resolution')
+    variant = 'info'
+  } else if (isDynamicPricingModel(props.model)) {
     label = t('Dynamic Pricing')
     variant = 'warning'
   } else if (isTokenBasedModel(props.model)) {
