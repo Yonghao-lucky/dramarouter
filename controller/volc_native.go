@@ -141,11 +141,13 @@ func RelayVolcNativeImage(c *gin.Context) {
 		}
 	}
 
-	if err := service.SettleBilling(c, info, priceData.Quota); err != nil {
+	volcUsage := model.BillingUsageDelta{UsedQuota: int64(priceData.Quota), RequestCount: 1}
+	volcUsageApplied, settleErr := service.SettleBillingWithUsage(c, info, priceData.Quota, volcUsage)
+	if settleErr != nil {
 		respondVolcNativeError(c, http.StatusInternalServerError, "billing_settlement_failed", "failed to settle usage")
 		return
 	}
-	service.LogTaskConsumption(c, info, nil)
+	service.LogTaskConsumption(c, info, nil, volcUsageApplied)
 	succeeded = true
 	c.Data(resp.StatusCode, contentType, responseBody)
 }

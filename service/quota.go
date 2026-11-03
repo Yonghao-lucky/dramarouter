@@ -233,12 +233,19 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	usageDelta := model.BillingUsageDelta{}
+	if totalTokens != 0 {
+		usageDelta = model.BillingUsageDelta{UsedQuota: int64(quota), RequestCount: 1}
+	}
+	usageApplied, settleErr := SettleBillingWithUsage(ctx, relayInfo, quota, usageDelta)
+	if settleErr != nil {
+		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+	}
+	if totalTokens != 0 && !usageApplied {
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 	}
 
 	logModel := modelName
@@ -362,12 +369,19 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, relayInfo.OriginModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	audioUsageDelta := model.BillingUsageDelta{}
+	if totalTokens != 0 {
+		audioUsageDelta = model.BillingUsageDelta{UsedQuota: int64(quota), RequestCount: 1}
+	}
+	audioUsageApplied, audioSettleErr := SettleBillingWithUsage(ctx, relayInfo, quota, audioUsageDelta)
+	if audioSettleErr != nil {
+		logger.LogError(ctx, "error settling billing: "+audioSettleErr.Error())
+	}
+	if totalTokens != 0 && !audioUsageApplied {
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 	}
 
 	logModel := relayInfo.OriginModelName
@@ -425,14 +439,23 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 type postConsumeQuotaResult struct {
 	FundingApplied bool
 	TokenApplied   bool
+	// UsageApplied 表示用量计数已随钱包扣费事务提交，调用方不应重复累加。
+	UsageApplied bool
 }
 
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) error {
-	_, err := postConsumeQuotaWithResult(relayInfo, quota, preConsumedQuota, sendEmail)
+	_, err := PostConsumeQuotaWithUsage(relayInfo, quota, preConsumedQuota, sendEmail, model.BillingUsageDelta{})
 	return err
 }
 
-func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (result postConsumeQuotaResult, err error) {
+// PostConsumeQuotaWithUsage 与 PostConsumeQuota 相同，但钱包扣费会在同一事务内
+// 累加 usage 计数。返回 applied=true 表示调用方不必再单独累加 used_quota。
+func PostConsumeQuotaWithUsage(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool, usage model.BillingUsageDelta) (bool, error) {
+	result, err := postConsumeQuotaWithResult(relayInfo, quota, preConsumedQuota, sendEmail, usage)
+	return result.UsageApplied, err
+}
+
+func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool, usage model.BillingUsageDelta) (result postConsumeQuotaResult, err error) {
 
 	// 1) Consume from wallet quota OR subscription item
 	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
@@ -448,14 +471,15 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 		}
 	} else {
 		// Wallet
-		_, err = model.PostBillingAdjustment(&model.BillingEntry{
+		applied, adjustErr := model.PostBillingAdjustmentWithUsage(&model.BillingEntry{
 			EventKey: "adjust:" + common.GetUUID(), UserID: relayInfo.UserId,
 			Kind: "usage", Quota: int64(quota), WalletDelta: -int64(quota),
 			RequestID: relayInfo.RequestId, ModelName: relayInfo.OriginModelName, TokenID: relayInfo.TokenId,
-		}, nil)
-		if err != nil {
-			return result, err
+		}, nil, usage)
+		if adjustErr != nil {
+			return result, adjustErr
 		}
+		result.UsageApplied = applied
 	}
 	result.FundingApplied = true
 

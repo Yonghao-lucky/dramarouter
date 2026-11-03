@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 
+import { ApiAddressPopover } from './components/api-address-popover'
 import { ApiKeysDialogs } from './components/api-keys-dialogs'
 import { ApiKeysPrimaryButtons } from './components/api-keys-primary-buttons'
 import { ApiKeysProvider } from './components/api-keys-provider'
@@ -32,7 +33,10 @@ export function ApiKeys() {
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>{t('API Keys')}</SectionPageLayout.Title>
         <SectionPageLayout.Actions>
-          <ApiKeysPrimaryButtons />
+          <div className='flex gap-2'>
+            <ApiAddressPopover />
+            <ApiKeysPrimaryButtons />
+          </div>
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <ApiKeysTable />

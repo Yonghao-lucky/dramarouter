@@ -151,7 +151,12 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 	}
 	ss := relayInfo.StreamStatus
 	status := "ok"
-	if !ss.IsNormalEnd() || ss.HasErrors() {
+	switch {
+	case ss.EndReason == relaycommon.StreamEndReasonClientGone && !ss.HasErrors():
+		// 客户端主动断开不是平台故障：单独标记为中性状态，
+		// 避免与上游截断、超时等真实错误混在同一个红色告警里。
+		status = "client_cancelled"
+	case !ss.IsNormalEnd() || ss.HasErrors():
 		status = "error"
 	}
 	streamInfo := map[string]interface{}{

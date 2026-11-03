@@ -52,6 +52,15 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+	_, err := SettleBillingWithUsage(ctx, relayInfo, actualQuota, model.BillingUsageDelta{})
+	return err
+}
+
+// SettleBillingWithUsage 在结算的同时累加用量计数。
+// 返回 usageApplied=true 表示 used_quota / request_count 已经随钱包结算事务提交，
+// 调用方不得再单独累加；false 表示需要调用方沿原有路径累加（订阅计费、
+// 无 BillingSession 的降级路径）。
+func SettleBillingWithUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, usage model.BillingUsageDelta) (bool, error) {
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
@@ -74,8 +83,17 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			))
 		}
 
-		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
-			return err
+		applied := false
+		if session, ok := relayInfo.Billing.(interface {
+			SettleWithUsage(actualQuota int, usage model.BillingUsageDelta) (bool, error)
+		}); ok {
+			var err error
+			applied, err = session.SettleWithUsage(actualQuota, usage)
+			if err != nil {
+				return false, err
+			}
+		} else if err := relayInfo.Billing.Settle(actualQuota); err != nil {
+			return false, err
 		}
 
 		// 发送额度通知（订阅计费使用订阅剩余额度）
@@ -86,17 +104,17 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 				checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
 			}
 		}
-		return nil
+		return applied, nil
 	}
 
 	// 回退：无 BillingSession 时使用旧路径
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
-		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+		return false, PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
 	}
 	if actualQuota == 0 && relayInfo.BillingSource != BillingSourceSubscription {
 		_, err := model.PostBillingAdjustment(&model.BillingEntry{EventKey: "free:" + common.GetUUID(), UserID: relayInfo.UserId, Kind: "usage", RequestID: relayInfo.RequestId, ModelName: relayInfo.OriginModelName, TokenID: relayInfo.TokenId}, nil)
-		return err
+		return false, err
 	}
-	return nil
+	return false, nil
 }

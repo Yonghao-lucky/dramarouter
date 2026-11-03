@@ -263,7 +263,22 @@ func ResizeBillingReservation(id string, userID int, target int64) error {
 	}
 	return err
 }
+// BillingUsageDelta 承载必须与钱包结算同事务提交的聚合用量计数。
+// 拆成独立的内存批处理会在线程池刷库失败或进程重启时静默丢失，
+// 导致 users.used_quota 与 billing_entries 永久对不上。
+type BillingUsageDelta struct {
+	UsedQuota    int64
+	RequestCount int64
+}
+
 func FinishBillingOperation(id string, userID int, actual int64, refund bool) error {
+	return FinishBillingOperationWithUsage(id, userID, actual, refund, BillingUsageDelta{})
+}
+
+// FinishBillingOperationWithUsage 在结算事务内同时累加 used_quota 与 request_count。
+// 用量计数写在状态机校验之后，只有真正发生 reserved→settled/refunded 转换时才执行，
+// 重复结算会先命中幂等早退，不会重复计用量。
+func FinishBillingOperationWithUsage(id string, userID int, actual int64, refund bool, usage BillingUsageDelta) error {
 	if actual < 0 || actual > int64(common.MaxWalletQuota) {
 		return errors.New("invalid billing charge")
 	}
@@ -295,6 +310,14 @@ func FinishBillingOperation(id string, userID int, actual int64, refund bool) er
 				return err
 			}
 		}
+		if !refund && (usage.UsedQuota != 0 || usage.RequestCount != 0) {
+			if err := tx.Model(&User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+				"used_quota":    gorm.Expr("used_quota + ?", usage.UsedQuota),
+				"request_count": gorm.Expr("request_count + ?", usage.RequestCount),
+			}).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Model(&op).Updates(map[string]interface{}{"state": state, "actual": actual, "updated_at": common.GetTimestamp()}).Error
 	})
 	if err == nil {
@@ -305,6 +328,12 @@ func FinishBillingOperation(id string, userID int, actual int64, refund bool) er
 
 // EventKey must be server-owned. Admin funding never counts as consumption.
 func PostBillingAdjustment(entry *BillingEntry, override *int) (bool, error) {
+	return PostBillingAdjustmentWithUsage(entry, override, BillingUsageDelta{})
+}
+
+// PostBillingAdjustmentWithUsage 在同一事务内完成钱包调整与用量计数累加，
+// 供违规费等不经过 BillingSession 的扣费路径使用。
+func PostBillingAdjustmentWithUsage(entry *BillingEntry, override *int, usage BillingUsageDelta) (bool, error) {
 	if entry.Quota > int64(common.MaxWalletQuota) || entry.Quota < -int64(common.MaxWalletQuota) {
 		return false, ErrWalletQuotaLimitExceeded
 	}
@@ -346,6 +375,14 @@ func PostBillingAdjustment(entry *BillingEntry, override *int) (bool, error) {
 		if err := appendBillingEntry(tx, &user, entry); err != nil {
 			return err
 		}
+		if usage.UsedQuota != 0 || usage.RequestCount != 0 {
+			if err := tx.Model(&User{}).Where("id = ?", entry.UserID).Updates(map[string]interface{}{
+				"used_quota":    gorm.Expr("used_quota + ?", usage.UsedQuota),
+				"request_count": gorm.Expr("request_count + ?", usage.RequestCount),
+			}).Error; err != nil {
+				return err
+			}
+		}
 		applied = true
 		return nil
 	})
@@ -371,6 +408,13 @@ func BillingMonthBounds(month string) (int64, int64, error) {
 // AdjustBillingTaskQuota commits the task's refund/settlement marker and money
 // in the same transaction, so a stale poller cannot refund a task twice.
 func AdjustBillingTaskQuota(task *Task, target int, modelName string) (bool, error) {
+	return AdjustBillingTaskQuotaWithUsage(task, target, modelName, BillingUsageDelta{})
+}
+
+// AdjustBillingTaskQuotaWithUsage 在任务额度调整事务内一并累加用量计数。
+// 返回的 applied 表示额度是否真的发生变化；用量只在同一次事务内提交，
+// 幂等早退（额度已等于目标值）时两者都不写。
+func AdjustBillingTaskQuotaWithUsage(task *Task, target int, modelName string, usage BillingUsageDelta) (bool, error) {
 	if target < 0 || target > common.MaxWalletQuota {
 		return false, errors.New("invalid task charge")
 	}
@@ -398,6 +442,14 @@ func AdjustBillingTaskQuota(task *Task, target int, modelName string) (bool, err
 		if err := appendBillingEntry(tx, &user, &entry); err != nil {
 			return err
 		}
+		if usage.UsedQuota != 0 || usage.RequestCount != 0 {
+			if err := tx.Model(&User{}).Where("id = ?", task.UserId).Updates(map[string]interface{}{
+				"used_quota":    gorm.Expr("used_quota + ?", usage.UsedQuota),
+				"request_count": gorm.Expr("request_count + ?", usage.RequestCount),
+			}).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Model(&current).Update("quota", target).Error; err != nil {
 			return err
 		}
@@ -411,6 +463,12 @@ func AdjustBillingTaskQuota(task *Task, target int, modelName string) (bool, err
 }
 
 func RefundBillingMidjourney(task *Midjourney, modelName string) (bool, error) {
+	return RefundBillingMidjourneyWithUsage(task, modelName, BillingUsageDelta{})
+}
+
+// RefundBillingMidjourneyWithUsage 在退款事务内一并回减用量计数，
+// 避免退款成功而 used_quota 未回减导致的永久偏差。
+func RefundBillingMidjourneyWithUsage(task *Midjourney, modelName string, usage BillingUsageDelta) (bool, error) {
 	applied := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
@@ -433,6 +491,14 @@ func RefundBillingMidjourney(task *Midjourney, modelName string) (bool, error) {
 		entry := BillingEntry{EventKey: "mj-refund:" + common.GetUUID(), UserID: task.UserId, Kind: "task_adjustment", Quota: -int64(current.Quota), WalletDelta: int64(current.Quota), RequestID: task.MjId, ModelName: modelName, TokenID: task.TokenId}
 		if err := appendBillingEntry(tx, &user, &entry); err != nil {
 			return err
+		}
+		if usage.UsedQuota != 0 || usage.RequestCount != 0 {
+			if err := tx.Model(&User{}).Where("id = ?", task.UserId).Updates(map[string]interface{}{
+				"used_quota":    gorm.Expr("used_quota + ?", usage.UsedQuota),
+				"request_count": gorm.Expr("request_count + ?", usage.RequestCount),
+			}).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Model(&current).Update("quota", 0).Error; err != nil {
 			return err

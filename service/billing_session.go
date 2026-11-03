@@ -33,6 +33,7 @@ type BillingSession struct {
 	fundingSettled   bool // funding.Settle 已成功，资金来源已提交
 	settled          bool // Settle 全部完成（资金 + 令牌）
 	refunded         bool // Refund 已调用
+	usageApplied     bool // 用量计数已随结算事务提交，调用方不应重复累加
 	mu               sync.Mutex
 }
 
@@ -73,6 +74,54 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	}
 	s.settled = true
 	return tokenErr
+}
+
+// SettleWithUsage 与 Settle 相同，但把 users.used_quota / request_count 的累加
+// 并入钱包结算事务。返回 usageApplied=false 表示该资金来源无法事务化
+// （订阅计费或不带 operation 的降级路径），调用方需自行累加用量。
+func (s *BillingSession) SettleWithUsage(actualQuota int, usage model.BillingUsageDelta) (bool, error) {
+	if s.funding.Source() != BillingSourceWallet {
+		return false, s.Settle(actualQuota)
+	}
+	funder, ok := s.funding.(interface {
+		SettleWithUsage(delta int, usage model.BillingUsageDelta) (bool, error)
+	})
+	if !ok {
+		return false, s.Settle(actualQuota)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.settled {
+		return s.usageApplied, nil
+	}
+	delta := actualQuota - s.preConsumedQuota
+	if !s.fundingSettled {
+		applied, err := funder.SettleWithUsage(delta, usage)
+		if err != nil {
+			return false, err
+		}
+		s.fundingSettled = true
+		s.usageApplied = applied
+	}
+
+	var tokenErr error
+	if delta != 0 && !s.relayInfo.IsPlayground {
+		if delta > 0 {
+			tokenErr = model.DecreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, delta)
+		} else {
+			tokenErr = model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, -delta)
+		}
+		if tokenErr != nil {
+			common.SysLog(fmt.Sprintf("error adjusting token quota after funding settled (userId=%d, tokenId=%d, delta=%d): %s",
+				s.relayInfo.UserId, s.relayInfo.TokenId, delta, tokenErr.Error()))
+		}
+	}
+	if s.funding.Source() == BillingSourceSubscription {
+		s.relayInfo.SubscriptionPostDelta += int64(delta)
+	}
+	s.settled = true
+	return s.usageApplied, tokenErr
 }
 
 // Refund 退还所有预扣费，幂等安全，异步执行。

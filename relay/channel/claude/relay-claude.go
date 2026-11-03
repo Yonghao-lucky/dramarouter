@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -151,29 +152,59 @@ func countClaudeStreamBillableTools(c *gin.Context, info *relaycommon.RelayInfo,
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	if claudeInfo.Usage.PromptTokens == 0 {
-		//上游出错
-	}
-	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
+	// 上游真实返回的输入：input_tokens 不含 cache 读取与写入，全缓存请求会报 0，
+	// 因此必须合并 cache 后再判断是否缺失。
+	upstreamInputTokens := buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage).PromptTokens
+	upstreamInputReported := upstreamInputTokens > 0
+	// 输出只认 message_delta 上报的计数；message_start 的 output_tokens 是协议占位值。
+	upstreamOutputReported := claudeInfo.UpstreamOutputReported
+
+	if !upstreamInputReported || !upstreamOutputReported {
 		if common.DebugEnabled {
-			common.SysLog("claude response usage is not complete, maybe upstream error")
+			common.SysLog(fmt.Sprintf(
+				"claude response usage is not complete, maybe upstream error (input_reported=%t output_reported=%t)",
+				upstreamInputReported, upstreamOutputReported))
 		}
-		// 只补缺失字段，不整份覆盖——保留 message_start 已拿到的 cache 字段
-		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
-		if claudeInfo.Usage.CompletionTokens == 0 ||
-			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
-			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
-		}
-		if claudeInfo.Usage.PromptTokens == 0 {
-			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
+	}
+
+	// 展示用估算：仅在客户端确实收到正文时补齐，只影响返回给调用方的 usage 字段，
+	// 不写入计费快照。
+	if !upstreamOutputReported && claudeInfo.ResponseText.Len() > 0 {
+		estimated := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, upstreamInputTokens)
+		if estimated.CompletionTokens > claudeInfo.Usage.CompletionTokens {
+			claudeInfo.Usage.CompletionTokens = estimated.CompletionTokens
 		}
 		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 	}
+
 	if claudeInfo.Usage != nil {
 		claudeInfo.Usage.UsageSemantic = "anthropic"
 	}
-	if claudeInfo.Usage != nil && claudeInfo.Usage.BillingUsage == nil {
-		claudeInfo.Usage.BillingUsage = dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
+
+	// 计费快照只取上游真实上报的字段：未上报的一律置零，不估算、不伪装。
+	billingClaudeUsage := &dto.ClaudeUsage{
+		InputTokens:              claudeInfo.Usage.PromptTokens,
+		CacheReadInputTokens:     claudeInfo.Usage.PromptTokensDetails.CachedTokens,
+		CacheCreationInputTokens: claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens,
+		OutputTokens:             claudeInfo.Usage.CompletionTokens,
+		CacheCreation:            buildMessageDeltaPatchUsage(nil, claudeInfo).CacheCreation,
+	}
+	if !upstreamOutputReported {
+		billingClaudeUsage.OutputTokens = 0
+	}
+	if !upstreamInputReported {
+		billingClaudeUsage.InputTokens = 0
+		billingClaudeUsage.CacheReadInputTokens = 0
+		billingClaudeUsage.CacheCreationInputTokens = 0
+		billingClaudeUsage.CacheCreation = nil
+	}
+	// 始终给出非 nil 的计费快照：只有这样才能阻止结算回退到顶层 Usage
+	// 而把展示用估算值当成上游数据扣费。
+	claudeInfo.Usage.BillingUsage = &dto.BillingUsage{
+		Source:      dto.BillingUsageSourceClaudeMessages,
+		Semantic:    dto.BillingUsageSemanticAnthropic,
+		Estimated:   !upstreamInputReported || !upstreamOutputReported,
+		ClaudeUsage: billingClaudeUsage,
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {

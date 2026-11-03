@@ -301,7 +301,7 @@ func callLogTaskConsumption(t *testing.T, info *relaycommon.RelayInfo, task *mod
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 	ctx.Set("token_name", "test_token")
-	LogTaskConsumption(ctx, info, task)
+	LogTaskConsumption(ctx, info, task, false)
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	return log
@@ -486,7 +486,7 @@ func TestLogTaskConsumptionLinksStoredVideoRequestBody(t *testing.T) {
 				},
 			}
 
-			LogTaskConsumption(ctx, info, nil)
+			LogTaskConsumption(ctx, info, nil, false)
 
 			var log model.Log
 			require.NoError(t, model.DB.Order("id desc").First(&log).Error)
@@ -645,7 +645,7 @@ func TestSettleMidjourneyTaskBillingRequiresPersistedTask(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, prepared)
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, _, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
 
 	require.Error(t, err)
 	assert.False(t, billed)
@@ -694,7 +694,7 @@ func TestMidjourneyRefundRestoresEveryAccountingElementOnBillingChannel(t *testi
 	assert.Equal(t, billingChannelID, task.BillingChannelId)
 	require.NoError(t, task.Insert())
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, _, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
 	require.NoError(t, err)
 	require.True(t, billed)
 	assert.Equal(t, initialUserQuota-chargedQuota, getUserQuota(t, userID))
@@ -774,7 +774,7 @@ func TestSettleMidjourneyTaskBillingFundingFailureClearsMarkers(t *testing.T) {
 		model.DB.Exec("DROP TRIGGER IF EXISTS fail_midjourney_user_update")
 	})
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, _, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
 
 	require.Error(t, err)
 	assert.False(t, billed)
@@ -828,7 +828,7 @@ func TestSettleMidjourneyTaskBillingTokenFailureKeepsFundingRefundable(t *testin
 		model.DB.Exec("DROP TRIGGER IF EXISTS fail_midjourney_token_update")
 	})
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, _, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
 
 	require.Error(t, err)
 	require.True(t, billed)

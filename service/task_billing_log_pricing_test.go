@@ -49,7 +49,7 @@ func TestTaskConsumptionLogPreservesStructuredPricingRatios(t *testing.T) {
 			for name, ratio := range tt.ratios {
 				info.PriceData.AddOtherRatio(name, ratio)
 			}
-			LogTaskConsumption(ctx, info, nil)
+			LogTaskConsumption(ctx, info, nil, false)
 
 			var log model.Log
 			require.NoError(t, model.DB.Order("id desc").First(&log).Error)

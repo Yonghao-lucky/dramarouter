@@ -72,8 +72,16 @@ type textQuotaSummary struct {
 // A request can carry zero tokens yet still be billable via a tool-call
 // surcharge (e.g. /v1/alpha/search returns no usage but bills one web_search
 // call), so token count alone is not sufficient to decide.
+//
+// Claude 的 input_tokens 不含 cache 读取与写入，全缓存请求的 PromptTokens 为 0
+// 但 CacheTokens 非零，属于真实计费量，不能因为 TotalTokens 为 0 就判为不可计费。
 func (s *textQuotaSummary) hasBillableUsage() bool {
-	return s.TotalTokens > 0 || !s.ToolCallSurchargeQuota.IsZero()
+	if s.TotalTokens > 0 || !s.ToolCallSurchargeQuota.IsZero() {
+		return true
+	}
+	return s.IsClaudeUsageSemantic &&
+		(s.CacheTokens > 0 || s.CacheCreationTokens > 0 ||
+			s.CacheCreationTokens5m > 0 || s.CacheCreationTokens1h > 0)
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -444,12 +452,20 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	// 用量计数与钱包结算同事务提交：批处理刷库失败或进程重启都不会再丢 used_quota。
+	usageDelta := model.BillingUsageDelta{}
+	if summary.hasBillableUsage() {
+		usageDelta = model.BillingUsageDelta{UsedQuota: int64(summary.Quota), RequestCount: 1}
+	}
+	usageApplied, settleErr := SettleBillingWithUsage(ctx, relayInfo, summary.Quota, usageDelta)
+	if settleErr != nil {
+		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+	}
+	if summary.hasBillableUsage() && !usageApplied {
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 	}
 
 	logModel := summary.ModelName

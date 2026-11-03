@@ -444,7 +444,10 @@ func TestAwsStreamHandlerStopsAtClientCancellationAndKeepsPartialBillingUsage(t 
 	assert.Equal(t, dto.BillingUsageSourceClaudeMessages, result.usage.BillingUsage.Source)
 	assert.Equal(t, dto.BillingUsageSemanticAnthropic, result.usage.BillingUsage.Semantic)
 	assert.Equal(t, 100, result.usage.BillingUsage.ClaudeUsage.InputTokens)
-	assert.Equal(t, 1, result.usage.BillingUsage.ClaudeUsage.OutputTokens)
+	// message_delta 未到达时上游没有上报真实输出计数；message_start 的 output_tokens
+	// 是协议占位值，不得计入计费。输入仍然保留，因此这是"部分用量"而非全零。
+	assert.Equal(t, 0, result.usage.BillingUsage.ClaudeUsage.OutputTokens)
+	assert.True(t, result.usage.BillingUsage.Estimated)
 	assert.Equal(t, bodyLengthBeforeCancel, responseWriter.Body.Len())
 	assert.NotContains(t, responseWriter.Body.String(), "[DONE]")
 

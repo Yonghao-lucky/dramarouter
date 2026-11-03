@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CircleAlert } from 'lucide-react'
+import { CircleAlert, CircleSlash } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -158,8 +158,15 @@ interface StreamTpsCellProps {
 
 export function StreamTpsCell(props: StreamTpsCellProps) {
   const { t } = useTranslation()
+  const streamStatus = props.streamStatus?.status
+  // client_cancelled 表示客户端主动断开，是正常行为，不应与平台故障同色告警。
   const showStreamError =
-    props.isStream && props.streamStatus && props.streamStatus.status !== 'ok'
+    props.isStream &&
+    streamStatus !== undefined &&
+    streamStatus !== 'ok' &&
+    streamStatus !== 'client_cancelled'
+  const showStreamCancelled =
+    props.isStream && streamStatus === 'client_cancelled'
   const tpsLabel =
     props.tokensPerSecond != null
       ? `${Math.round(props.tokensPerSecond)} t/s`
@@ -197,6 +204,23 @@ export function StreamTpsCell(props: StreamTpsCellProps) {
                       {t('Soft Errors')}: {props.streamStatus?.error_count}
                     </p>
                   )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {showStreamCancelled && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <CircleSlash className='text-muted-foreground size-3' />
+                }
+              />
+              <TooltipContent>
+                <div className='space-y-0.5 text-xs'>
+                  <p>{t('Client cancelled the request')}</p>
+                  <p>{props.streamStatus?.end_reason || 'client_gone'}</p>
                 </div>
               </TooltipContent>
             </Tooltip>

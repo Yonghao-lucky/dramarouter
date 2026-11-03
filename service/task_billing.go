@@ -23,7 +23,8 @@ import (
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
-func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model.Task) {
+// usageApplied 为 true 表示 used_quota / request_count 已随结算事务提交，此处不再重复累加。
+func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model.Task, usageApplied bool) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
 	// 支持任务仅按次计费
@@ -104,8 +105,10 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		Other:          other,
 		CostAccounting: costAccounting,
 	})
-	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+	if !usageApplied {
+		model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -212,12 +215,13 @@ func taskIsSubscription(task *model.Task) bool {
 }
 
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
-func taskAdjustFunding(task *model.Task, delta int) error {
+// usage 会与钱包额度调整同事务提交；返回 usageApplied=true 表示调用方不必再单独累加用量。
+func taskAdjustFunding(task *model.Task, delta int, usage model.BillingUsageDelta) (bool, error) {
 	if taskIsSubscription(task) {
-		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
+		return false, model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
 	}
-	_, err := model.AdjustBillingTaskQuota(task, task.Quota+delta, taskModelName(task))
-	return err
+	applied, err := model.AdjustBillingTaskQuotaWithUsage(task, task.Quota+delta, taskModelName(task), usage)
+	return applied, err
 }
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
@@ -332,8 +336,11 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
+	usageApplied := false
 	if !taskIsSubscription(task) {
-		applied, err := model.AdjustBillingTaskQuota(task, 0, taskModelName(task))
+		// 退款同时回减预扣时累计的用量；请求次数保持不变。
+		applied, err := model.AdjustBillingTaskQuotaWithUsage(task, 0, taskModelName(task),
+			model.BillingUsageDelta{UsedQuota: -int64(quota)})
 		if err != nil {
 			logger.LogWarn(ctx, "task wallet refund failed: "+err.Error())
 			return false
@@ -342,18 +349,23 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 			task.Quota = 0
 			return true
 		}
+		usageApplied = true
 	} else {
-		if err := taskAdjustFunding(task, -quota); err != nil {
+		applied, err := taskAdjustFunding(task, -quota, model.BillingUsageDelta{UsedQuota: -int64(quota)})
+		if err != nil {
 			logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
 			return false
 		}
+		usageApplied = applied
 	}
 
 	// 2. 退还令牌额度
 	taskAdjustTokenQuota(ctx, task, -quota)
 
 	// 3. 回减预扣时累计的用户和渠道用量，请求次数保持不变
-	model.UpdateUserUsedQuota(task.UserId, -quota)
+	if !usageApplied {
+		model.UpdateUserUsedQuota(task.UserId, -quota)
+	}
 	model.UpdateChannelUsedQuota(task.ChannelId, -quota)
 
 	// 4. 记录日志
@@ -410,8 +422,10 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	))
 
 	// 调整资金来源
+	usageApplied := false
 	if !taskIsSubscription(task) {
-		applied, err := model.AdjustBillingTaskQuota(task, actualQuota, taskModelName(task))
+		applied, err := model.AdjustBillingTaskQuotaWithUsage(task, actualQuota, taskModelName(task),
+			model.BillingUsageDelta{UsedQuota: int64(quotaDelta)})
 		if err != nil {
 			logger.LogError(ctx, "task wallet settlement failed: "+err.Error())
 			return
@@ -420,11 +434,14 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 			task.Quota = actualQuota
 			return
 		}
+		usageApplied = true
 	} else {
-		if err := taskAdjustFunding(task, quotaDelta); err != nil {
+		applied, err := taskAdjustFunding(task, quotaDelta, model.BillingUsageDelta{UsedQuota: int64(quotaDelta)})
+		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
 			return
 		}
+		usageApplied = applied
 	}
 
 	// 调整令牌额度
@@ -438,7 +455,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	}
 
 	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量。
-	model.UpdateUserUsedQuota(task.UserId, quotaDelta)
+	if !usageApplied {
+		model.UpdateUserUsedQuota(task.UserId, quotaDelta)
+	}
 	model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 
 	var logType int

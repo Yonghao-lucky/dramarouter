@@ -921,13 +921,15 @@ func executeTaskSubmissionWith(
 	diagnostics.durable(task)
 	diagnostics.settleStart(task, result.Quota)
 
-	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+	taskUsage := model.BillingUsageDelta{UsedQuota: int64(result.Quota), RequestCount: 1}
+	usageApplied, settleErr := service.SettleBillingWithUsage(c, relayInfo, result.Quota, taskUsage)
+	if settleErr != nil {
 		common.SysError("settle task billing error: " + settleErr.Error())
 		taskErr = service.TaskErrorWrapperLocal(errors.New("failed to settle task billing"), "task_billing_settlement_failed", http.StatusInternalServerError)
 		diagnostics.failed("settle", "billing_error", taskErr, true)
 		return nil, taskErr
 	}
-	service.LogTaskConsumption(c, relayInfo, task)
+	service.LogTaskConsumption(c, relayInfo, task, usageApplied)
 	diagnostics.complete(task, result.Quota)
 
 	return &taskSubmissionOutcome{Result: result, Task: task, RelayInfo: relayInfo}, nil

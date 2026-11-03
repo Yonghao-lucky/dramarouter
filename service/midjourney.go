@@ -69,26 +69,28 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 }
 
 // SettleMidjourneyTaskBilling charges a persisted legacy task and records the applied stages.
-func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, prepared bool) (bool, error) {
+// usageApplied 表示 used_quota / request_count 已随扣费事务提交，调用方不得再累加。
+func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, prepared bool) (applied bool, usageApplied bool, err error) {
 	if !prepared {
-		return false, nil
+		return false, false, nil
 	}
 	if relayInfo == nil {
-		return false, errors.New("relay info is nil")
+		return false, false, errors.New("relay info is nil")
 	}
 	if task == nil || task.Id == 0 {
-		return false, errors.New("Midjourney task must be persisted before billing")
+		return false, false, errors.New("Midjourney task must be persisted before billing")
 	}
 
-	result, billingErr := postConsumeQuotaWithResult(relayInfo, task.Quota, 0, true)
+	result, billingErr := postConsumeQuotaWithResult(relayInfo, task.Quota, 0, true,
+		model.BillingUsageDelta{UsedQuota: int64(task.Quota), RequestCount: 1})
 	if !result.FundingApplied {
 		task.Quota = 0
 		task.TokenId = 0
 		task.BillingChannelId = 0
 		if updateErr := task.UpdateBillingState(); updateErr != nil {
-			return false, errors.Join(billingErr, fmt.Errorf("clear Midjourney billing state: %w", updateErr))
+			return false, false, errors.Join(billingErr, fmt.Errorf("clear Midjourney billing state: %w", updateErr))
 		}
-		return false, billingErr
+		return false, false, billingErr
 	}
 
 	task.TokenId = 0
@@ -96,9 +98,9 @@ func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.M
 		task.TokenId = relayInfo.TokenId
 	}
 	if updateErr := task.UpdateBillingState(); updateErr != nil {
-		return true, errors.Join(billingErr, fmt.Errorf("update Midjourney billing state: %w", updateErr))
+		return true, result.UsageApplied, errors.Join(billingErr, fmt.Errorf("update Midjourney billing state: %w", updateErr))
 	}
-	return true, billingErr
+	return true, result.UsageApplied, billingErr
 }
 
 // RefundMidjourneyQuota reverses every accounting element recorded for a billed legacy task.
@@ -108,7 +110,8 @@ func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason s
 		return true
 	}
 
-	applied, err := model.RefundBillingMidjourney(task, CovertMjpActionToModelName(task.Action))
+	applied, err := model.RefundBillingMidjourneyWithUsage(task, CovertMjpActionToModelName(task.Action),
+		model.BillingUsageDelta{UsedQuota: -int64(quota)})
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 用户额度失败 task %s: %s", task.MjId, err.Error()))
 		return false
@@ -128,7 +131,6 @@ func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason s
 	}
 
 	billingChannelId := task.GetBillingChannelId()
-	model.UpdateUserUsedQuota(task.UserId, -quota)
 	model.UpdateChannelUsedQuota(billingChannelId, -quota)
 	other := map[string]interface{}{
 		"task_id": task.MjId,

@@ -79,6 +79,18 @@ func (w *WalletFunding) Settle(delta int) error {
 	return model.IncreaseUserQuota(w.userId, -delta, false)
 }
 
+// SettleWithUsage 把用量计数与钱包结算放进同一个事务。
+// 走 operation 的正常路径可以在事务内一起提交；无 operation 的降级路径
+// 没有事务可用，返回 applied=false 让调用方沿用原有累加。
+func (w *WalletFunding) SettleWithUsage(delta int, usage model.BillingUsageDelta) (bool, error) {
+	if w.operation == nil {
+		return false, w.Settle(delta)
+	}
+	err := model.FinishBillingOperationWithUsage(
+		w.operation.ID, w.userId, int64(w.consumed)+int64(delta), false, usage)
+	return err == nil, err
+}
+
 func (w *WalletFunding) Refund() error {
 	if w.operation != nil {
 		return refundWithRetry(func() error { return model.FinishBillingOperation(w.operation.ID, w.userId, 0, true) })

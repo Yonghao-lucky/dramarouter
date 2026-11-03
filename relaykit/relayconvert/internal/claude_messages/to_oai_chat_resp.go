@@ -19,6 +19,10 @@ type ClaudeResponseInfo struct {
 	ResponseText strings.Builder
 	Usage        *dto.Usage
 	Done         bool
+	// UpstreamOutputReported records that message_delta carried the final
+	// output token count. message_start's output_tokens is a protocol
+	// placeholder, so an interrupted stream never reports a real one.
+	UpstreamOutputReported bool
 }
 
 func StopReasonClaudeToOpenAI(reason string) string {
@@ -381,6 +385,7 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 			}
 			if claudeResponse.Usage.OutputTokens > 0 {
 				claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
+				claudeInfo.UpstreamOutputReported = true
 			}
 			claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 			claudeInfo.Usage.BillingUsage = claudeBillingUsageFromSemanticUsage(claudeInfo.Usage)
