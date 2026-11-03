@@ -17,9 +17,12 @@ docker exec "$CTR" pg_dump -U dramarouter -d dramarouter --no-owner --no-acl \
   | gzip -6 > "$OUT.tmp"
 mv "$OUT.tmp" "$OUT"
 
-# 校验：gzip 完整性 + 至少含一条 COPY 数据段
+# 校验：gzip 完整性 + 至少含一条 COPY 数据段。
+# 注意不能用 `zcat | grep -q`：grep 命中即退出会让 zcat 收到 SIGPIPE，
+# 在 pipefail 下整条管道被判失败，正常的备份也会误报。
 gzip -t "$OUT"
-if ! zcat "$OUT" | grep -q '^COPY '; then
+copy_lines=$(gzip -dc "$OUT" | grep -c '^COPY ' || true)
+if [ "${copy_lines:-0}" -eq 0 ]; then
   echo "备份校验失败，内容不完整: $OUT" >&2
   exit 1
 fi
