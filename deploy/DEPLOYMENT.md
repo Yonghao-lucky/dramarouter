@@ -332,12 +332,32 @@ docker restart dramarouter-us-pg
 | `health-watchdog.sh` | 按容器健康状态动态摘除/挂回后端，可配 cron 每分钟执行 |
 | `backup-pg.sh` | 每日 `pg_dump` 备份，保留 14 天 |
 
-推荐 cron：
+推荐 cron（线上已装）：
 
 ```cron
 * * * * * /opt/dramarouter-secrets/health-watchdog.sh
 30 4 * * * /opt/dramarouter-secrets/backup-pg.sh >> /var/log/dramarouter-backup.log 2>&1
+20 4 * * * find /opt/1panel/apps/local/dramarouter/*-logs -name "oneapi-*.log*" -mtime +14 -delete
 ```
+
+### 日志轮转
+
+应用在**每次启动**时按启动时间戳新建一个 `oneapi-YYYYMMDDHHMMSS.log`，运行期间追加写同一个文件，自己不做清理。因此光靠 logrotate 的 `rotate`/`maxage` 不够——那两项只统计被轮转过的文件，进程自己新建的旧文件不在其中。
+
+所以要两条一起用：
+
+1. `deploy/logrotate-dramarouter.conf` → 装到 `/etc/logrotate.d/dramarouter`，管**单次运行写太大**（`maxsize 200M`）并压缩。应用以 `O_WRONLY` 持有 fd，必须 `copytruncate`，否则重命名后进程继续写旧 inode。
+2. 上面那条 `find ... -mtime +14 -delete` cron，管**重启次数多导致文件堆积**。活跃文件一直在写、`mtime` 始终是新的，不会被误删。
+
+安装：
+
+```bash
+cp deploy/logrotate-dramarouter.conf /etc/logrotate.d/dramarouter
+chmod 644 /etc/logrotate.d/dramarouter
+logrotate -d /etc/logrotate.d/dramarouter   # 调试，只打印不执行
+```
+
+每个容器目录当前约 29MB、59 个历史文件；按 14 天保留稳定在 40–60MB 量级。
 
 ---
 
@@ -383,7 +403,7 @@ cd /root/dramarouter/web && bun install && bun run build
 | --- | --- | --- |
 | P0 | 每日数据库备份 | 脚本已就绪，需装 cron |
 | P1 | Nginx / upstream 配置进版本管理 | 已完成（本目录） |
-| P1 | 日志轮转 | 未做，`*-logs` 下按天生成文件，量上来前建议加 logrotate |
+| P1 | 日志轮转 | 已完成（logrotate + 14 天清理 cron） |
 | P2 | `ServerAddress` 与下载域名 | 当前 `https://realmdrama.com`；若要从 studio 域名生成下载链接需调整 |
 | P2 | 香港灾备保留周期 | 建议备份跑通并验证恢复后再决定 |
 | P3 | 单机无热备 | 如未来需要 HA，再评估流复制 + 人工提升方案 |
