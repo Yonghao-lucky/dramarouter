@@ -32,13 +32,45 @@ func init() {
 	}
 }
 
+var (
+	batchUpdaterStop     = make(chan struct{})
+	batchUpdaterDone     = make(chan struct{})
+	batchUpdaterStopOnce sync.Once
+)
+
 func InitBatchUpdater() {
+	interval := common.BatchUpdateInterval
+	if interval <= 0 {
+		// time.NewTicker 不接受非正周期，退回与默认值一致的 5 秒
+		interval = 5
+	}
 	gopool.Go(func() {
+		defer close(batchUpdaterDone)
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		defer ticker.Stop()
 		for {
-			time.Sleep(time.Duration(common.BatchUpdateInterval) * time.Second)
-			batchUpdate()
+			select {
+			case <-ticker.C:
+				batchUpdate()
+			case <-batchUpdaterStop:
+				return
+			}
 		}
 	})
+}
+
+// StopBatchUpdater stops the periodic flush and writes whatever is still
+// buffered in memory. Called during graceful shutdown so a restart does not
+// discard the last BATCH_UPDATE_INTERVAL seconds of usage and quota deltas.
+func StopBatchUpdater() {
+	if !common.BatchUpdateEnabled {
+		return
+	}
+	batchUpdaterStopOnce.Do(func() {
+		close(batchUpdaterStop)
+	})
+	<-batchUpdaterDone
+	batchUpdate()
 }
 
 func addNewRecord(type_ int, id int, value int) {

@@ -98,15 +98,38 @@ Docker 网桥 `192.168.240.1/20`，因此 `TRUSTED_PROXIES` 必须是 `127.0.0.1
 ### 滚动更新做了什么
 
 ```text
+⓪ 预检：两台都 healthy（否则拒绝执行，除非 FORCE=1）
 ① 改 upstream：把要更新的容器标 down，新请求只进另一个
-② 等 5 秒让旧连接排空
+② 等 DRAIN_SECONDS（默认 10 秒）让旧连接排空
 ③ docker compose stop + up -d --no-deps --force-recreate 该容器
 ④ 轮询 http://127.0.0.1:<端口>/api/status 直到健康
-⑤ 恢复 upstream 双后端
+⑤ 把已就绪的这台挂回 upstream（此时又是双后端）
 ⑥ 对另一个容器重复 ①-⑤
 ```
 
-客户无感：Nginx 不向 `down` 的节点发新请求，已建立的连接继续跑；容器收到 SIGTERM 后先等手上请求结束再退出（`SHUTDOWN_TIMEOUT_SECONDS=540`，Docker 宽限期 `stop_grace_period=600s`）。
+客户无感：Nginx 不向 `down` 的节点发新请求，已建立的连接继续跑；容器收到 SIGTERM 后先等手上请求结束再退出（`SHUTDOWN_TIMEOUT_SECONDS=540`，Docker 宽限期 `stop_grace_period=600s`）。退出前还会把批量更新器里缓存的用量增量落库（`model.StopBatchUpdater`），重启不再丢最后 5 秒的配额。
+
+### 失败自动回滚
+
+任何一步失败（新镜像起不来、健康检查 4 分钟未通过、nginx 配置校验失败）都会自动回滚：
+
+```text
+① 把 dramarouter:latest 指回更新前运行中的镜像
+② upstream 只挂当前真能响应的端口，避免打到重建中的容器
+③ 倒序对本次已更新的服务重建，每次重建前把流量留在健康的那台
+④ 结束后 upstream 挂载当时健康的全部后端，退出码 1
+```
+
+回滚后仍需人工确认日志，但**不会出现只剩单后端裸奔**。
+
+可用环境变量：
+
+| 变量 | 默认 | 用途 |
+| --- | --- | --- |
+| `DRAIN_SECONDS` | `10` | 摘除后端后等待排空秒数；流量大或大请求多时调大 |
+| `FORCE` | 未设 | `1` 时跳过预检。只在明确接受停机风险时使用 |
+
+预检不通过（例如一台已经不健康）时脚本退出码为 2，不会动任何容器。
 
 ### 有数据库结构变更的版本
 

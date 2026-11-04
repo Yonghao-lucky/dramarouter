@@ -280,6 +280,8 @@ func main() {
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()
 	}
+	// 落盘批量更新器里缓存的用量/额度增量，再关库连接
+	model.StopBatchUpdater()
 	if err := service.StopRuntimeMonitoring(ctx); err != nil {
 		common.SysError("runtime monitoring shutdown: " + err.Error())
 	}
