@@ -78,6 +78,11 @@ export interface ResellerCustomerDetail extends ResellerCustomer {
 
 export interface ResellerCustomerGroup {
   group: string
+  /** Provider that dominates the group's models; the price book groups by it. */
+  vendor?: string
+  vendor_icon?: string
+  /** Customer-facing description, kept in sync with the admin group settings. */
+  description?: string
   cost_ratio: string
   ratio: string
   source: string

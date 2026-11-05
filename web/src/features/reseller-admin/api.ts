@@ -53,6 +53,17 @@ export interface ResellerBook {
   }[]
   /** The platform's own ratio per group: what an ordinary account pays. */
   platform_ratios?: Record<string, number>
+  /**
+   * Groups a reseller may price: visible to customers and still served by an
+   * enabled channel. GroupRatio also keeps hidden and retired groups, so the
+   * price book must use this list instead of fetching every group.
+   */
+  groups?: {
+    group: string
+    vendor: string
+    vendor_icon?: string
+    description?: string
+  }[]
 }
 
 export interface AdminResellerCustomer {

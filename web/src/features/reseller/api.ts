@@ -30,6 +30,7 @@ import type {
   ResellerPriceBook,
   ResellerQuotaAlert,
   ResellerSettlement,
+  ResellerPriceTemplate,
   ResellerSummary,
   ResellerTemplateBundle,
   ResellerTransfer,

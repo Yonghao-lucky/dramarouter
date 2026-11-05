@@ -201,14 +201,27 @@ func AdminResellerPriceBook(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// Only groups a customer can actually use and that an enabled channel still
+	// serves are offered here. GroupRatio keeps entries for hidden and retired
+	// groups, so listing it directly would show the administrator groups that no
+	// longer exist for customers.
+	groups, err := model.ResellerBookGroups(resellerId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	// The platform's own group ratio is the reference an administrator needs
 	// when deciding a wholesale price or a standing retail price: it is what an
 	// ordinary account pays for that group. It is read-only here.
 	platform := map[string]float64{}
-	for group, ratio := range ratio_setting.GetGroupRatioCopy() {
-		platform[group] = ratio
+	for _, group := range groups {
+		if ratio_setting.ContainsGroupRatio(group.Group) {
+			platform[group.Group] = ratio_setting.GetGroupRatio(group.Group)
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"costs": costs, "defaults": defaults, "platform_ratios": platform}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"costs": costs, "defaults": defaults, "platform_ratios": platform, "groups": groups,
+	}})
 }
 
 // AdminResellerCustomers lists the customers owned by one reseller.

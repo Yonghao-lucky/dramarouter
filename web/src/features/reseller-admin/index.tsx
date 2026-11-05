@@ -35,7 +35,6 @@ import {
 } from '@/components/ui/table'
 
 import {
-  getGroups,
   getResellerBook,
   getResellerCustomers,
   listResellerGrants,
@@ -55,6 +54,8 @@ import { PanelBoundary } from '@/features/reseller/panel-boundary'
 import { GrantDialog } from './grant-dialog'
 import { GrantsTable } from './grants-table'
 import { OverviewPanel } from './overview-panel'
+import { getLobeIcon } from '@/lib/lobe-icon'
+
 import { SettlementPanel } from './settlement-panel'
 
 const QUOTA_PER_UNIT = 500000
@@ -66,13 +67,6 @@ function formatQuota(value: number) {
 function ProfileBook({ resellerId }: { resellerId: number }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  // A dedicated key: the users and channels modules also query ['groups'] but
-  // cache the whole response envelope, so sharing this key hands this panel an
-  // object where it expects an array and the table throws on .map.
-  const groups = useQuery({
-    queryKey: ['reseller-admin', 'groups'],
-    queryFn: getGroups,
-  })
   const book = useQuery({
     queryKey: ['reseller-admin', 'book', resellerId],
     queryFn: () => getResellerBook(resellerId),
@@ -162,7 +156,20 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
     onError: (error: Error) => toast.error(error.message),
   })
 
-  const groupNames = groups.data ?? []
+  // Use the server's filtered list: it already drops groups hidden from
+  // customers and groups no enabled channel serves any more. Fetching every
+  // group from /api/group/ showed both.
+  const groupRows = book.data?.groups ?? []
+  type GroupRow = NonNullable<NonNullable<typeof book.data>['groups']>[number]
+  const groupSections = groupRows.reduce<
+    { vendor: string; icon?: string; groups: GroupRow[] }[]
+  >((sections, row) => {
+    const vendor = row.vendor || t('Other')
+    const last = sections[sections.length - 1]
+    if (last && last.vendor === vendor) last.groups.push(row)
+    else sections.push({ vendor, icon: row.vendor_icon, groups: [row] })
+    return sections
+  }, [])
   const costByGroup = new Map(
     (book.data?.costs ?? []).map((row) => [row.group, row.cost_ratio])
   )
@@ -176,87 +183,109 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
 
   return (
     <div className='flex flex-col gap-4'>
-      <Card>
-        <CardHeader className='pb-2'>
-          <CardTitle className='text-sm'>
-            {t('Wholesale and standing retail price')}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('Group')}</TableHead>
-                <TableHead>{t('Platform ratio')}</TableHead>
-                <TableHead>{t('Wholesale')}</TableHead>
-                <TableHead>{t('Set wholesale')}</TableHead>
-                <TableHead>{t('Retail')}</TableHead>
-                <TableHead>{t('Set retail')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {groupNames.map((group) => (
-                <TableRow key={group}>
-                  <TableCell>{group}</TableCell>
-                  <TableCell className='text-muted-foreground tabular-nums'>
-                    {platformByGroup[group] ?? '-'}
-                  </TableCell>
-                  <TableCell className='tabular-nums'>
-                    {costByGroup.get(group) ?? '-'}
-                  </TableCell>
-                  <TableCell>
-                    <div className='flex items-center gap-2'>
-                      <Input
-                        className='w-24'
-                        value={costDrafts[group] ?? ''}
-                        onChange={(event) =>
-                          setCostDrafts((prev) => ({
-                            ...prev,
-                            [group]: event.target.value,
-                          }))
-                        }
-                      />
-                      <Button
-                        size='sm'
-                        variant='outline'
-                        disabled={!costDrafts[group]}
-                        onClick={() => saveCost.mutate(group)}
-                      >
-                        {t('Save')}
-                      </Button>
+      {/* One card per provider: the flat table mixed every group into a single
+          alphabetical list, which is hard to scan once a reseller covers many
+          providers. Each group keeps its customer-facing description. */}
+      <div className='grid gap-3 xl:grid-cols-2'>
+        {groupSections.map((section) => (
+          <Card key={section.vendor}>
+            <CardHeader className='pb-2'>
+              <CardTitle className='flex items-center gap-2 text-sm'>
+                {section.icon ? getLobeIcon(section.icon, 18) : null}
+                {section.vendor}
+                <span className='text-muted-foreground text-xs font-normal'>
+                  {t('{{count}} groups', { count: section.groups.length })}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className='flex flex-col gap-3'>
+              {section.groups.map((row) => (
+                <div
+                  key={row.group}
+                  className='flex flex-col gap-2 rounded-lg border p-3'
+                >
+                  <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
+                    <span className='text-sm font-medium'>{row.group}</span>
+                    <span className='text-muted-foreground text-xs tabular-nums'>
+                      {t('Platform ratio')} {platformByGroup[row.group] ?? '-'}
+                    </span>
+                  </div>
+                  {row.description ? (
+                    <p className='text-muted-foreground text-xs'>
+                      {row.description}
+                    </p>
+                  ) : null}
+                  <div className='grid gap-2 sm:grid-cols-2'>
+                    <div className='flex flex-col gap-1'>
+                      <span className='text-muted-foreground text-xs'>
+                        {t('Wholesale')}{' '}
+                        {costByGroup.get(row.group)
+                          ? `(${costByGroup.get(row.group)})`
+                          : ''}
+                      </span>
+                      <div className='flex items-center gap-2'>
+                        <Input
+                          className='h-8'
+                          value={costDrafts[row.group] ?? ''}
+                          onChange={(event) =>
+                            setCostDrafts((prev) => ({
+                              ...prev,
+                              [row.group]: event.target.value,
+                            }))
+                          }
+                        />
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          disabled={!costDrafts[row.group]}
+                          onClick={() => saveCost.mutate(row.group)}
+                        >
+                          {t('Save')}
+                        </Button>
+                      </div>
                     </div>
-                  </TableCell>
-                  <TableCell className='tabular-nums'>
-                    {retailByGroup.get(group) ?? '-'}
-                  </TableCell>
-                  <TableCell>
-                    <div className='flex items-center gap-2'>
-                      <Input
-                        className='w-24'
-                        value={priceDrafts[group] ?? ''}
-                        onChange={(event) =>
-                          setPriceDrafts((prev) => ({
-                            ...prev,
-                            [group]: event.target.value,
-                          }))
-                        }
-                      />
-                      <Button
-                        size='sm'
-                        variant='outline'
-                        disabled={!priceDrafts[group]}
-                        onClick={() => savePrice.mutate(group)}
-                      >
-                        {t('Save')}
-                      </Button>
+                    <div className='flex flex-col gap-1'>
+                      <span className='text-muted-foreground text-xs'>
+                        {t('Retail')}{' '}
+                        {retailByGroup.get(row.group)
+                          ? `(${retailByGroup.get(row.group)})`
+                          : ''}
+                      </span>
+                      <div className='flex items-center gap-2'>
+                        <Input
+                          className='h-8'
+                          value={priceDrafts[row.group] ?? ''}
+                          onChange={(event) =>
+                            setPriceDrafts((prev) => ({
+                              ...prev,
+                              [row.group]: event.target.value,
+                            }))
+                          }
+                        />
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          disabled={!priceDrafts[row.group]}
+                          onClick={() => savePrice.mutate(row.group)}
+                        >
+                          {t('Save')}
+                        </Button>
+                      </div>
                     </div>
-                  </TableCell>
-                </TableRow>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        ))}
+        {groupSections.length === 0 ? (
+          <Card>
+            <CardContent className='text-muted-foreground py-8 text-center text-sm'>
+              {t('No records yet')}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
 
       <Card>
         <CardHeader className='pb-2'>

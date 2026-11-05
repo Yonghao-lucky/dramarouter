@@ -324,10 +324,21 @@ func ListResellerMarginDays(resellerUserId int, start, end int64) ([]ResellerMar
 // the group costs the reseller (when it has a wholesale row) and the price a
 // specific customer would be charged there.
 type ResellerPlatformGroupRow struct {
-	Group     string `json:"group"`
-	CostRatio string `json:"cost_ratio"`
-	Ratio     string `json:"ratio"`
-	Source    string `json:"source"`
+	Group string `json:"group"`
+	// Vendor is the provider that dominates the group's enabled models. The
+	// console groups the price book by it so the list reads by provider rather
+	// than as one flat alphabetical list.
+	Vendor string `json:"vendor"`
+	// VendorIcon is the vendor's logo key (for example "Moonshot"), the same
+	// value the token creation page renders, so both screens look identical.
+	VendorIcon string `json:"vendor_icon"`
+	// Description is the group's customer-facing description. It is read from
+	// UserUsableGroups on every call, so an administrator editing the text sees
+	// it here without a restart.
+	Description string `json:"description"`
+	CostRatio   string `json:"cost_ratio"`
+	Ratio       string `json:"ratio"`
+	Source      string `json:"source"`
 	// PlatformRatio is the ratio the platform charges an ordinary account for
 	// this group. It is the default customer price: a customer who is never
 	// priced by the reseller pays exactly what the platform charges, so the
@@ -339,25 +350,171 @@ type ResellerPlatformGroupRow struct {
 	Sellable bool `json:"sellable"`
 }
 
-// platformGroupNames returns every group the platform serves, sorted. The
-// reseller's price book may cover a subset; customer placement is independent
-// of it.
+// platformGroupNames returns the groups the platform actually sells to
+// customers, sorted by vendor then name.
+//
+// Two filters matter here. A group the administrator hid from customers must not
+// appear in a reseller's price book, because the reseller cannot place a
+// customer there. A group that no enabled channel serves any more must not
+// appear either: it stays in GroupRatio and may still have a stale wholesale
+// row, but selling it would fail at request time.
+//
+// extra carries groups from the reseller's existing price rows so a group that
+// was priced before it was hidden is not silently dropped while still holding
+// live customers. An extra group is kept only when an enabled channel still
+// serves it; the caller decides what to do with the rest.
 func platformGroupNames(extra ...string) []string {
-	names := make(map[string]struct{}, 32)
-	for name := range setting.GetUserUsableGroupsCopy() {
+	visible := setting.GetUserUsableGroupsCopy()
+	names := make(map[string]struct{}, len(visible)+len(extra))
+	for name := range visible {
 		names[name] = struct{}{}
 	}
+	// Dedupe: extra carries the reseller's existing price rows, which are
+	// usually also visible groups. Appending blindly emitted the same group
+	// twice and the price book showed duplicate editable rows.
+	listed := make([]string, 0, len(names)+len(extra))
+	seen := make(map[string]struct{}, len(names)+len(extra))
+	for name := range names {
+		listed = append(listed, name)
+		seen[name] = struct{}{}
+	}
 	for _, name := range extra {
-		if name != "" {
-			names[name] = struct{}{}
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		listed = append(listed, name)
+		seen[name] = struct{}{}
+	}
+	served, err := resellerServedGroups(listed)
+	if err != nil {
+		// A lookup failure must not empty the price book. Fall back to the
+		// configured groups so the console still renders.
+		common.SysError("failed to resolve served groups: " + err.Error())
+		served = make(map[string]bool, len(names))
+		for name := range names {
+			served[name] = true
 		}
 	}
-	result := make([]string, 0, len(names))
-	for name := range names {
-		result = append(result, name)
+	result := make([]string, 0, len(served))
+	for _, name := range listed {
+		if served[name] {
+			result = append(result, name)
+		}
 	}
 	sort.Strings(result)
 	return result
+}
+
+// resellerServedGroups reports which of the given groups have at least one
+// enabled model behind an enabled channel. It reads the same ability table the
+// billing path resolves channels from, so a group it rejects cannot be sold.
+func resellerServedGroups(groups []string) (map[string]bool, error) {
+	served := make(map[string]bool, len(groups))
+	if len(groups) == 0 {
+		return served, nil
+	}
+	rows := make([]string, 0, len(groups))
+	err := DB.Table("abilities").
+		Select("DISTINCT abilities."+commonGroupCol+" AS model_group").
+		Joins("JOIN channels ON channels.id = abilities.channel_id").
+		Where("abilities."+commonGroupCol+" IN ? AND abilities.enabled = ? AND channels.status = ?", groups, true, common.ChannelStatusEnabled).
+		Pluck("model_group", &rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range rows {
+		served[name] = true
+	}
+	return served, nil
+}
+
+// resellerGroupVendors maps each group to the vendor that dominates it, so the
+// price book can be grouped by provider instead of one flat alphabetical list.
+// Ties break on the vendor name to keep the order stable across requests.
+// resellerVendorInfo is the provider attribution for one group.
+type resellerVendorInfo struct {
+	Name string
+	Icon string
+}
+
+func resellerGroupVendors(groups []string) (map[string]resellerVendorInfo, error) {
+	vendors := make(map[string]resellerVendorInfo, len(groups))
+	if len(groups) == 0 {
+		return vendors, nil
+	}
+	type row struct {
+		ModelGroup string `gorm:"column:model_group"`
+		VendorName string `gorm:"column:vendor_name"`
+		VendorIcon string `gorm:"column:vendor_icon"`
+		Models     int    `gorm:"column:models"`
+	}
+	rows := make([]row, 0, len(groups))
+	err := DB.Table("abilities").
+		Select("abilities."+commonGroupCol+" AS model_group, COALESCE(vendors.name, '') AS vendor_name, COALESCE(vendors.icon, '') AS vendor_icon, COUNT(DISTINCT abilities.model) AS models").
+		Joins("JOIN models ON models.model_name = abilities.model").
+		Joins("LEFT JOIN vendors ON vendors.id = models.vendor_id").
+		Where("abilities."+commonGroupCol+" IN ? AND abilities.enabled = ?", groups, true).
+		Group("abilities." + commonGroupCol + ", COALESCE(vendors.name, ''), COALESCE(vendors.icon, '')").
+		Order("models DESC, vendor_name ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	// Rows arrive vendor-heaviest first, so the first row of each group wins.
+	for _, row := range rows {
+		if _, seen := vendors[row.ModelGroup]; seen {
+			continue
+		}
+		vendors[row.ModelGroup] = resellerVendorInfo{Name: row.VendorName, Icon: row.VendorIcon}
+	}
+	return vendors, nil
+}
+
+// ResellerBookGroups is the administrator's view of the groups a reseller may
+// price: the visible, currently served groups plus any group the reseller
+// already has a wholesale row for. It carries the vendor so the console can
+// order the price book by provider.
+func ResellerBookGroups(resellerId int) ([]ResellerPlatformGroupRow, error) {
+	if resellerId <= 0 {
+		return nil, ErrResellerTransferInvalid
+	}
+	priced := make([]string, 0, 16)
+	if err := DB.Model(&ResellerGroupCost{}).
+		Where("reseller_id = ?", resellerId).
+		Pluck("group_name", &priced).Error; err != nil {
+		return nil, err
+	}
+	names := platformGroupNames(priced...)
+	vendorByGroup, err := resellerGroupVendors(names)
+	if err != nil {
+		common.SysError("failed to resolve group vendors: " + err.Error())
+		vendorByGroup = map[string]resellerVendorInfo{}
+	}
+	descriptions := setting.GetUserUsableGroupsCopy()
+	rows := make([]ResellerPlatformGroupRow, 0, len(names))
+	for _, name := range names {
+		info := vendorByGroup[name]
+		rows = append(rows, ResellerPlatformGroupRow{
+			Group:       name,
+			Vendor:      info.Name,
+			VendorIcon:  info.Icon,
+			Description: descriptions[name],
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Vendor != rows[j].Vendor {
+			// Ungrouped vendors sort last so real providers come first.
+			if rows[i].Vendor == "" || rows[j].Vendor == "" {
+				return rows[j].Vendor == ""
+			}
+			return rows[i].Vendor < rows[j].Vendor
+		}
+		return rows[i].Group < rows[j].Group
+	})
+	return rows, nil
 }
 
 // ResellerPlatformGroups lists every platform group with the caller's cost and
@@ -396,9 +553,23 @@ func ResellerPlatformGroups(resellerUserId, customerUserId int) ([]ResellerPlatf
 	}
 
 	groupNames := platformGroupNames(extra...)
+	vendorByGroup, err := resellerGroupVendors(groupNames)
+	if err != nil {
+		// Vendor is presentation only; a lookup failure must not break the book.
+		common.SysError("failed to resolve group vendors: " + err.Error())
+		vendorByGroup = map[string]resellerVendorInfo{}
+	}
+	descriptions := setting.GetUserUsableGroupsCopy()
 	rows := make([]ResellerPlatformGroupRow, 0, len(groupNames))
 	for _, name := range groupNames {
-		row := ResellerPlatformGroupRow{Group: name, CostRatio: costByGroup[name]}
+		info := vendorByGroup[name]
+		row := ResellerPlatformGroupRow{
+			Group:       name,
+			Vendor:      info.Name,
+			VendorIcon:  info.Icon,
+			Description: descriptions[name],
+			CostRatio:   costByGroup[name],
+		}
 		// A group without an explicit wholesale row still costs the reseller the
 		// platform's own group ratio, which is exactly what the billing path
 		// charges against when it computes the margin.

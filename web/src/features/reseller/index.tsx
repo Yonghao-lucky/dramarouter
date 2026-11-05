@@ -54,6 +54,7 @@ import {
   parseQuotaFromDollars,
   quotaUnitsToEditableAmount,
 } from '@/lib/format'
+import { getLobeIcon } from '@/lib/lobe-icon'
 
 import {
   claimResellerMargin,
@@ -84,7 +85,11 @@ import {
   setResellerCustomerStatus,
   transferResellerQuota,
 } from './api'
-import type { ResellerCustomer, ResellerCustomerDetail } from './types'
+import type {
+  ResellerCustomer,
+  ResellerCustomerDetail,
+  ResellerCustomerGroup,
+} from './types'
 
 function StatCard(props: { title: string; value: string; hint?: string }) {
   return (
@@ -1184,38 +1189,68 @@ function ProfitPanel() {
 
 function PriceBookPanel() {
   const { t } = useTranslation()
-  // Every platform group is listed, not just the groups that already have a
-  // wholesale cost row: a reseller needs to see which groups they can sell in
-  // and which still have no cost configured.
+  // The server returns the groups this reseller may actually price: visible to
+  // customers and still served by an enabled channel. Each row carries its
+  // provider and the customer-facing description, so the book can be shown as
+  // one card per provider instead of a flat table.
   const groups = useQuery({
     queryKey: ['reseller', 'platform-groups'],
     queryFn: getResellerPlatformGroups,
   })
 
+  const sections = (groups.data ?? []).reduce<
+    { vendor: string; icon?: string; rows: ResellerCustomerGroup[] }[]
+  >((result, row) => {
+    const vendor = row.vendor || t('Other')
+    const last = result[result.length - 1]
+    if (last && last.vendor === vendor) last.rows.push(row)
+    else result.push({ vendor, icon: row.vendor_icon, rows: [row] })
+    return result
+  }, [])
+
+  if (sections.length === 0) {
+    return <EmptyRow colSpan={1} />
+  }
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t('Group')}</TableHead>
-          <TableHead>{t('My cost')}</TableHead>
-          <TableHead>{t('Standing price')}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {(groups.data ?? []).map((row) => (
-          <TableRow key={row.group}>
-            <TableCell>{row.group}</TableCell>
-            <TableCell className='tabular-nums'>
-              {row.sellable ? row.cost_ratio : t('No cost set')}
-            </TableCell>
-            <TableCell className='tabular-nums'>
-              {row.sellable ? row.ratio || row.cost_ratio : '—'}
-            </TableCell>
-          </TableRow>
-        ))}
-        {(groups.data ?? []).length === 0 ? <EmptyRow colSpan={3} /> : null}
-      </TableBody>
-    </Table>
+    <div className='grid gap-3 xl:grid-cols-2'>
+      {sections.map((section) => (
+        <Card key={section.vendor}>
+          <CardHeader className='pb-2'>
+            <CardTitle className='flex items-center gap-2 text-sm'>
+              {section.icon ? getLobeIcon(section.icon, 18) : null}
+              {section.vendor}
+              <span className='text-muted-foreground text-xs font-normal'>
+                {t('{{count}} groups', { count: section.rows.length })}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className='flex flex-col gap-2'>
+            {section.rows.map((row) => (
+              <div
+                key={row.group}
+                className='flex flex-col gap-1 rounded-lg border p-3'
+              >
+                <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
+                  <span className='text-sm font-medium'>{row.group}</span>
+                  <span className='text-muted-foreground text-xs tabular-nums'>
+                    {t('My cost')} {row.sellable ? row.cost_ratio : t('No cost set')}
+                    {' · '}
+                    {t('Standing price')}{' '}
+                    {row.sellable ? row.ratio || row.cost_ratio : '—'}
+                  </span>
+                </div>
+                {row.description ? (
+                  <p className='text-muted-foreground text-xs'>
+                    {row.description}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
   )
 }
 
@@ -1386,7 +1421,12 @@ function DashboardPanel() {
   return (
     <div className='flex flex-col gap-4'>
       <div className='flex flex-wrap items-center gap-2'>
-        <Select value={days} onValueChange={setDays}>
+        <Select
+          value={days}
+          onValueChange={(value) => {
+            if (value) setDays(value)
+          }}
+        >
           <SelectTrigger className='w-32'>
             <SelectValue />
           </SelectTrigger>
@@ -1527,7 +1567,7 @@ function SettlementsPanel() {
       <div className='flex flex-wrap items-center gap-2'>
         <Select
           value={status || 'all'}
-          onValueChange={(value) => setStatus(value === 'all' ? '' : value)}
+          onValueChange={(value) => setStatus(!value || value === 'all' ? '' : value)}
         >
           <SelectTrigger className='w-36'>
             <SelectValue />
@@ -1773,7 +1813,12 @@ function TemplatesPanel() {
           <CardTitle className='text-sm'>{t('Apply a template')}</CardTitle>
         </CardHeader>
         <CardContent className='flex flex-col gap-3'>
-          <Select value={applyTemplate} onValueChange={setApplyTemplate}>
+          <Select
+            value={applyTemplate}
+            onValueChange={(value) => {
+              if (value) setApplyTemplate(value)
+            }}
+          >
             <SelectTrigger className='max-w-sm'>
               <SelectValue placeholder={t('Choose a template')} />
             </SelectTrigger>
