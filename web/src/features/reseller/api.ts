@@ -435,3 +435,10 @@ export async function setResellerQuotaAlert(payload: {
       .data
   )
 }
+
+/** Persist the caller's own price-book ordering. */
+export async function saveResellerGroupOrder(groups: string[]) {
+  return (
+    await api.put<Response<null>>('/api/reseller/group-order', { groups })
+  ).data
+}

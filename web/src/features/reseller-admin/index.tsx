@@ -16,8 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Drag01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { Reorder, useDragControls } from 'motion/react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -48,6 +51,7 @@ import {
   type ResellerOverviewRow,
   type ResellerProfile,
   upsertResellerProfile,
+  setResellerGroupOrder,
 } from './api'
 import { PanelBoundary } from '@/features/reseller/panel-boundary'
 
@@ -62,6 +66,37 @@ const QUOTA_PER_UNIT = 500000
 
 function formatQuota(value: number) {
   return (value / QUOTA_PER_UNIT).toFixed(4)
+}
+
+// GroupOrderItem is one draggable row in the price book. Dragging is bound to
+// the handle only, so the inputs inside stay clickable and editable.
+function GroupOrderItem(props: {
+  group: string
+  children: React.ReactNode
+}) {
+  const { t } = useTranslation()
+  const dragControls = useDragControls()
+
+  return (
+    <Reorder.Item
+      value={props.group}
+      dragListener={false}
+      dragControls={dragControls}
+      className='bg-background relative rounded-lg'
+    >
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        className='text-muted-foreground absolute top-2 right-2 cursor-grab touch-none active:cursor-grabbing'
+        aria-label={t('Drag {{group}} to reorder', { group: props.group })}
+        onPointerDown={(event) => dragControls.start(event)}
+      >
+        <HugeiconsIcon icon={Drag01Icon} strokeWidth={2} aria-hidden='true' />
+      </Button>
+      {props.children}
+    </Reorder.Item>
+  )
 }
 
 function ProfileBook({ resellerId }: { resellerId: number }) {
@@ -159,9 +194,27 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
   // Use the server's filtered list: it already drops groups hidden from
   // customers and groups no enabled channel serves any more. Fetching every
   // group from /api/group/ showed both.
-  const groupRows = book.data?.groups ?? []
+  // The server returns the rows in the saved order. Keep a local copy so a drag
+  // feels instant, and rewrite it whenever the server list changes (for example
+  // after another administrator reorders it).
+  const serverRows = book.data?.groups ?? []
   type GroupRow = NonNullable<NonNullable<typeof book.data>['groups']>[number]
-  const groupSections = groupRows.reduce<
+  const [orderedRows, setOrderedRows] = useState<GroupRow[]>([])
+  useEffect(() => {
+    setOrderedRows(serverRows)
+  }, [serverRows])
+
+  const saveOrder = useMutation({
+    mutationFn: (groups: string[]) =>
+      setResellerGroupOrder({ reseller_id: resellerId, groups }),
+    onError: (error: Error) => {
+      toast.error(error.message)
+      // Reverting to the server order keeps the screen honest after a failure.
+      setOrderedRows(serverRows)
+    },
+  })
+
+  const groupSections = orderedRows.reduce<
     { vendor: string; icon?: string; groups: GroupRow[] }[]
   >((sections, row) => {
     const vendor = row.vendor || t('Other')
@@ -170,6 +223,18 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
     else sections.push({ vendor, icon: row.vendor_icon, groups: [row] })
     return sections
   }, [])
+
+  // Dragging inside a card reorders that card's groups; the flat list is
+  // rebuilt in section order so a later drag of the cards themselves keeps
+  // working off the same source of truth.
+  const moveGroup = (vendor: string, groups: GroupRow[]) => {
+    const next = groupSections.flatMap((section) =>
+      section.vendor === vendor ? groups : section.groups
+    )
+    setOrderedRows(next)
+    saveOrder.mutate(next.map((row) => row.group))
+  }
+
   const costByGroup = new Map(
     (book.data?.costs ?? []).map((row) => [row.group, row.cost_ratio])
   )
@@ -199,11 +264,23 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
               </CardTitle>
             </CardHeader>
             <CardContent className='flex flex-col gap-3'>
-              {section.groups.map((row) => (
-                <div
-                  key={row.group}
-                  className='flex flex-col gap-2 rounded-lg border p-3'
-                >
+              <Reorder.Group
+                axis='y'
+                values={section.groups.map((row) => row.group)}
+                onReorder={(order) => {
+                  const byName = new Map(
+                    section.groups.map((row) => [row.group, row])
+                  )
+                  const next = order
+                    .map((name) => byName.get(name))
+                    .filter((row): row is GroupRow => row !== undefined)
+                  moveGroup(section.vendor, next)
+                }}
+                className='flex flex-col gap-3'
+              >
+                {section.groups.map((row) => (
+                  <GroupOrderItem key={row.group} group={row.group}>
+                    <div className='flex flex-col gap-2 rounded-lg border p-3'>
                   <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
                     <span className='text-sm font-medium'>{row.group}</span>
                     <span className='text-muted-foreground text-xs tabular-nums'>
@@ -273,8 +350,10 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                    </div>
+                  </GroupOrderItem>
+                ))}
+              </Reorder.Group>
             </CardContent>
           </Card>
         ))}

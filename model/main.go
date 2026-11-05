@@ -328,7 +328,7 @@ func migrateDB() error {
 		&CustomerGroupPrice{}, &ResellerCustomerBinding{}, &ResellerCustomerEvent{},
 		&ResellerTransfer{}, &ResellerMarginCreditCursor{}, &ResellerWalletGrant{},
 		&ResellerSettlement{}, &ResellerPriceTemplate{}, &ResellerPriceTemplateItem{},
-		&ResellerQuotaAlert{}, &ResellerQuotaAlertSent{},
+		&ResellerQuotaAlert{}, &ResellerQuotaAlertSent{}, &ResellerGroupOrder{},
 		&BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{},
 		&Channel{},
 		&Token{},

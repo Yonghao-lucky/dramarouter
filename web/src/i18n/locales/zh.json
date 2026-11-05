@@ -8916,6 +8916,8 @@
     "Settlement voided": "结算已作废",
     "Received (minor units)": "累计实收（最小单位）",
     "No settlements yet": "暂无结算记录",
-    "Payment method": "收款方式"
+    "Payment method": "收款方式",
+    "Drag to reorder": "拖动排序",
+    "{{count}} groups": "{{count}} 个分组"
   }
 }

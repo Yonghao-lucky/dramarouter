@@ -494,6 +494,12 @@ func ResellerBookGroups(resellerId int) ([]ResellerPlatformGroupRow, error) {
 		vendorByGroup = map[string]resellerVendorInfo{}
 	}
 	descriptions := setting.GetUserUsableGroupsCopy()
+	positions, err := LoadResellerGroupOrder(resellerId)
+	if err != nil {
+		// Ordering is presentation only; fall back to the default order.
+		common.SysError("failed to load reseller group order: " + err.Error())
+		positions = map[string]int{}
+	}
 	rows := make([]ResellerPlatformGroupRow, 0, len(names))
 	for _, name := range names {
 		info := vendorByGroup[name]
@@ -504,7 +510,24 @@ func ResellerBookGroups(resellerId int) ([]ResellerPlatformGroupRow, error) {
 			Description: descriptions[name],
 		})
 	}
+	sortResellerGroupRows(rows, positions)
+	return rows, nil
+}
+
+// sortResellerGroupRows applies a saved ordering first and falls back to
+// vendor-then-name for every group the reseller never positioned. A group added
+// after the last drag therefore lands in its natural place instead of jumping to
+// the end.
+func sortResellerGroupRows(rows []ResellerPlatformGroupRow, positions map[string]int) {
 	sort.SliceStable(rows, func(i, j int) bool {
+		pi, iHas := positions[rows[i].Group]
+		pj, jHas := positions[rows[j].Group]
+		if iHas != jHas {
+			return iHas
+		}
+		if iHas && pi != pj {
+			return pi < pj
+		}
 		if rows[i].Vendor != rows[j].Vendor {
 			// Ungrouped vendors sort last so real providers come first.
 			if rows[i].Vendor == "" || rows[j].Vendor == "" {
@@ -514,7 +537,6 @@ func ResellerBookGroups(resellerId int) ([]ResellerPlatformGroupRow, error) {
 		}
 		return rows[i].Group < rows[j].Group
 	})
-	return rows, nil
 }
 
 // ResellerPlatformGroups lists every platform group with the caller's cost and
@@ -602,6 +624,12 @@ func ResellerPlatformGroups(resellerUserId, customerUserId int) ([]ResellerPlatf
 		}
 		rows = append(rows, row)
 	}
+	positions, err := LoadResellerGroupOrder(resellerUserId)
+	if err != nil {
+		common.SysError("failed to load reseller group order: " + err.Error())
+		positions = map[string]int{}
+	}
+	sortResellerGroupRows(rows, positions)
 	return rows, nil
 }
 

@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Drag01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Reorder, useDragControls } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -58,6 +61,7 @@ import { getLobeIcon } from '@/lib/lobe-icon'
 
 import {
   claimResellerMargin,
+  saveResellerGroupOrder,
   createResellerCustomer,
   getResellerCustomerDetail,
   getResellerCustomerGroups,
@@ -1187,6 +1191,32 @@ function ProfitPanel() {
   )
 }
 
+// GroupOrderItem binds dragging to the handle so the row content stays usable.
+function GroupOrderItem(props: { group: string; children: React.ReactNode }) {
+  const { t } = useTranslation()
+  const dragControls = useDragControls()
+  return (
+    <Reorder.Item
+      value={props.group}
+      dragListener={false}
+      dragControls={dragControls}
+      className='bg-background relative rounded-lg'
+    >
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        className='text-muted-foreground absolute top-2 right-2 cursor-grab touch-none active:cursor-grabbing'
+        aria-label={t('Drag {{group}} to reorder', { group: props.group })}
+        onPointerDown={(event) => dragControls.start(event)}
+      >
+        <HugeiconsIcon icon={Drag01Icon} strokeWidth={2} aria-hidden='true' />
+      </Button>
+      {props.children}
+    </Reorder.Item>
+  )
+}
+
 function PriceBookPanel() {
   const { t } = useTranslation()
   // The server returns the groups this reseller may actually price: visible to
@@ -1198,7 +1228,29 @@ function PriceBookPanel() {
     queryFn: getResellerPlatformGroups,
   })
 
-  const sections = (groups.data ?? []).reduce<
+  // Keep a local copy so a drag feels instant; rewrite it when the server list
+  // changes (for example after the administrator reorders the same book).
+  const serverRows = groups.data ?? []
+  const queryClient = useQueryClient()
+  const [orderedRows, setOrderedRows] = useState<ResellerCustomerGroup[]>([])
+  useEffect(() => {
+    setOrderedRows(serverRows)
+  }, [serverRows])
+
+  const saveOrder = useMutation({
+    mutationFn: (order: string[]) => saveResellerGroupOrder(order),
+    onError: (error: Error) => {
+      toast.error(error.message)
+      setOrderedRows(serverRows)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ['reseller', 'platform-groups'],
+      })
+    },
+  })
+
+  const sections = orderedRows.reduce<
     { vendor: string; icon?: string; rows: ResellerCustomerGroup[] }[]
   >((result, row) => {
     const vendor = row.vendor || t('Other')
@@ -1207,6 +1259,14 @@ function PriceBookPanel() {
     else result.push({ vendor, icon: row.vendor_icon, rows: [row] })
     return result
   }, [])
+
+  const moveGroup = (vendor: string, rows: ResellerCustomerGroup[]) => {
+    const next = sections.flatMap((section) =>
+      section.vendor === vendor ? rows : section.rows
+    )
+    setOrderedRows(next)
+    saveOrder.mutate(next.map((row) => row.group))
+  }
 
   if (sections.length === 0) {
     return <EmptyRow colSpan={1} />
@@ -1226,9 +1286,23 @@ function PriceBookPanel() {
             </CardTitle>
           </CardHeader>
           <CardContent className='flex flex-col gap-2'>
+            <Reorder.Group
+              axis='y'
+              values={section.rows.map((row) => row.group)}
+              onReorder={(order) => {
+                const byName = new Map(
+                  section.rows.map((row) => [row.group, row])
+                )
+                const next = order
+                  .map((name) => byName.get(name))
+                  .filter((row): row is ResellerCustomerGroup => row !== undefined)
+                moveGroup(section.vendor, next)
+              }}
+              className='flex flex-col gap-2'
+            >
             {section.rows.map((row) => (
+              <GroupOrderItem key={row.group} group={row.group}>
               <div
-                key={row.group}
                 className='flex flex-col gap-1 rounded-lg border p-3'
               >
                 <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
@@ -1246,7 +1320,9 @@ function PriceBookPanel() {
                   </p>
                 ) : null}
               </div>
+              </GroupOrderItem>
             ))}
+            </Reorder.Group>
           </CardContent>
         </Card>
       ))}

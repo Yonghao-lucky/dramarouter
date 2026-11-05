@@ -258,6 +258,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.PUT("/reseller/profile", controller.AdminUpsertReseller)
 				adminRoute.PUT("/reseller/cost", controller.AdminSetResellerCost)
 				adminRoute.PUT("/reseller/price", controller.AdminSetResellerDefaultPrice)
+				adminRoute.PUT("/reseller/group-order", controller.AdminSetResellerGroupOrder)
 				adminRoute.POST("/reseller/transfer", controller.AdminTransferResellerQuota)
 				adminRoute.GET("/:id/group-pricing", controller.AdminGetCustomerGroupPricing)
 				adminRoute.PUT("/:id/group-pricing", controller.AdminSetCustomerGroupPrice)
@@ -292,6 +293,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.POST("/margins/claim", controller.ResellerClaimMargin)
 			resellerRoute.GET("/price-book", controller.ResellerPriceBook)
 			resellerRoute.GET("/groups", controller.ResellerPlatformGroups)
+			resellerRoute.PUT("/group-order", controller.ResellerSetGroupOrder)
 			// Grant and settlement visibility: a reseller can see what the
 			// platform credited it, including unpaid pre-credit.
 			resellerRoute.GET("/grants", controller.ResellerGrants)

@@ -632,6 +632,55 @@ func ResellerTransfers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
 }
 
+type resellerGroupOrderRequest struct {
+	ResellerId int      `json:"reseller_id"`
+	Groups     []string `json:"groups"`
+}
+
+// AdminSetResellerGroupOrder stores the administrator's price-book ordering for
+// one reseller. The list is flat; vendor sections follow the first occurrence of
+// each provider.
+func AdminSetResellerGroupOrder(c *gin.Context) {
+	var req resellerGroupOrderRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil || req.ResellerId <= 0 {
+		common.ApiErrorMsg(c, "invalid group order")
+		return
+	}
+	if err := model.SaveResellerGroupOrder(req.ResellerId, req.Groups); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "reseller.group_order", map[string]interface{}{
+		"reseller_id": req.ResellerId,
+		"groups":      len(req.Groups),
+	})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ResellerSetGroupOrder stores the caller's own price-book ordering. The
+// reseller id always comes from the session, never from the request body.
+func ResellerSetGroupOrder(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Groups []string `json:"groups"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "invalid group order")
+		return
+	}
+	if err := model.SaveResellerGroupOrder(profile.UserId, req.Groups); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordResellerAudit(c, profile.UserId, "reseller.group_order", map[string]interface{}{
+		"groups": len(req.Groups),
+	})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // ResellerPlatformGroups lists every group the platform serves, annotated with
 // the caller's cost and standing price where it has one. The console uses this
 // for customer placement and for the price book header.

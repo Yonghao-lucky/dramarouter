@@ -354,3 +354,13 @@ export async function voidResellerSettlement(id: number) {
     ).data
   )
 }
+
+/** Persist the administrator's price-book ordering for one reseller. */
+export async function setResellerGroupOrder(payload: {
+  reseller_id: number
+  groups: string[]
+}) {
+  return (
+    await api.put<Response<null>>('/api/user/reseller/group-order', payload)
+  ).data
+}
