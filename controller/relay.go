@@ -527,6 +527,23 @@ func RelayNotImplemented(c *gin.Context) {
 	})
 }
 
+// RelayMethodNotAllowed answers a non-POST request on a relay endpoint with a
+// JSON 405 instead of a 404. Endpoint auto-detection in client tooling probes
+// with GET or HEAD; a 404 makes it conclude the endpoint does not exist, while a
+// 405 with Allow: POST tells it the path is real and a POST will work.
+func RelayMethodNotAllowed(c *gin.Context) {
+	err := types.OpenAIError{
+		Message: fmt.Sprintf("%s is not supported on %s; use POST", c.Request.Method, c.Request.URL.Path),
+		Type:    "invalid_request_error",
+		Param:   "",
+		Code:    "method_not_allowed",
+	}
+	c.Header("Allow", "POST")
+	c.JSON(http.StatusMethodNotAllowed, gin.H{
+		"error": err,
+	})
+}
+
 func RelayNotFound(c *gin.Context) {
 	err := types.OpenAIError{
 		Message: fmt.Sprintf("Invalid URL (%s %s)", c.Request.Method, c.Request.URL.Path),

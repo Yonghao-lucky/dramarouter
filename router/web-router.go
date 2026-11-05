@@ -49,6 +49,25 @@ func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.Han
 	)
 }
 
+// backendPathPrefixes are API paths that exist without the /v1 prefix. A
+// request to one of them must answer with the relay's JSON error instead of the
+// SPA shell: an HTML 200 makes client endpoint auto-detection conclude the host
+// is a website rather than a gateway. Frontend page routes are deliberately
+// excluded (for example /models and /chat are real pages).
+var backendPathPrefixes = []string{
+	"/chat/completions", "/completions", "/messages", "/responses",
+	"/embeddings", "/moderations", "/rerank", "/images/", "/audio/",
+	"/fine-tunes",
+}
+
 func isBackendRoute(path string) bool {
-	return path == "/v1" || strings.HasPrefix(path, "/v1/") || path == "/api" || strings.HasPrefix(path, "/api/")
+	if path == "/v1" || strings.HasPrefix(path, "/v1/") || path == "/api" || strings.HasPrefix(path, "/api/") {
+		return true
+	}
+	for _, prefix := range backendPathPrefixes {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }

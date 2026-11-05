@@ -101,11 +101,43 @@ func SetRelayRouter(router *gin.Engine) {
 		playgroundRouter.POST("/audio/transcriptions", controller.ValidatePlaygroundAudio, middleware.Distribute(), controller.PlaygroundAudio)
 		playgroundRouter.POST("/audio/speech", controller.ValidatePlaygroundAudio, middleware.Distribute(), controller.PlaygroundAudio)
 	}
+	// Root-level probes for the same endpoints without the /v1 prefix. Without
+	// these, /chat/completions falls through to the SPA and answers with
+	// index.html, which client tooling reports as "returned an HTML page, not an
+	// API endpoint". A JSON 405 that names the correct path lets the tool finish
+	// auto-completing the base URL.
+	rootProbeRouter := router.Group("")
+	rootProbeRouter.Use(middleware.RouteTag("relay"))
+	for _, path := range []string{
+		"/chat/completions", "/completions", "/messages", "/responses",
+		"/embeddings", "/rerank", "/moderations", "/images/generations",
+		"/audio/speech", "/audio/transcriptions",
+	} {
+		rootProbeRouter.GET(path, controller.RelayMethodNotAllowed)
+		rootProbeRouter.HEAD(path, controller.RelayMethodNotAllowed)
+	}
+
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
+
+	// Client tooling probes an API base URL with GET or HEAD before using it.
+	// These paths answer 405 + Allow: POST rather than 404, so auto-detection
+	// concludes the endpoint exists and completes the base URL instead of
+	// reporting "no chat/completions endpoint found". GET/HEAD only; every real
+	// method below stays POST. Registered before the POST group so the probe
+	// answers do not depend on channel distribution.
+	for _, path := range []string{
+		"/chat/completions", "/completions", "/messages", "/responses",
+		"/responses/compact", "/alpha/search", "/embeddings", "/moderations",
+		"/rerank", "/images/generations", "/images/edits",
+		"/audio/speech", "/audio/transcriptions", "/audio/translations",
+	} {
+		relayV1Router.GET(path, controller.RelayMethodNotAllowed)
+		relayV1Router.HEAD(path, controller.RelayMethodNotAllowed)
+	}
 	{
 		// WebSocket 路由（统一到 Relay）
 		wsRouter := relayV1Router.Group("")
