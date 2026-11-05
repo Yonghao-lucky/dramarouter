@@ -66,7 +66,13 @@ function formatQuota(value: number) {
 function ProfileBook({ resellerId }: { resellerId: number }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const groups = useQuery({ queryKey: ['groups'], queryFn: getGroups })
+  // A dedicated key: the users and channels modules also query ['groups'] but
+  // cache the whole response envelope, so sharing this key hands this panel an
+  // object where it expects an array and the table throws on .map.
+  const groups = useQuery({
+    queryKey: ['reseller-admin', 'groups'],
+    queryFn: getGroups,
+  })
   const book = useQuery({
     queryKey: ['reseller-admin', 'book', resellerId],
     queryFn: () => getResellerBook(resellerId),

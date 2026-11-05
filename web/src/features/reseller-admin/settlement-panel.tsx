@@ -169,7 +169,7 @@ export function SettlementPanel({ resellerId }: SettlementPanelProps) {
               />
             </div>
             <div className='flex flex-col gap-1'>
-              <Label className='text-xs'>{t('Method')}</Label>
+              <Label className='text-xs'>{t('Payment method')}</Label>
               <Input
                 value={method}
                 onChange={(event) => setMethod(event.target.value)}
