@@ -77,10 +77,7 @@ func GrantResellerWallet(resellerId, operatorId int, amount int64, kind, remark,
 	}
 	// A disabled profile may still be topped up: suspension freezes selling, not
 	// the administrator's ability to settle or pre-fund the account.
-	remark = strings.TrimSpace(remark)
-	if len(remark) > 255 {
-		remark = remark[:255]
-	}
+	remark = truncateResellerText(remark, 255)
 
 	grant := &ResellerWalletGrant{}
 	err = DB.Transaction(func(tx *gorm.DB) error {
@@ -99,39 +96,60 @@ func GrantResellerWallet(resellerId, operatorId int, amount int64, kind, remark,
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-
-		var user User
-		if err := lockForUpdate(tx).First(&user, resellerId).Error; err != nil {
+		granted, err := grantResellerWalletTx(tx, resellerId, operatorId, amount, normalized, remark, eventKey)
+		if err != nil {
 			return err
 		}
-		if err := changeBillingWallet(tx, &user, amount); err != nil {
-			return err
-		}
-		entry := BillingEntry{
-			EventKey:    "reseller:grant:" + strconv.Itoa(resellerId) + ":" + eventKey,
-			Kind:        "funding",
-			WalletDelta: amount,
-			ActorID:     operatorId,
-		}
-		if err := appendBillingEntry(tx, &user, &entry); err != nil {
-			return err
-		}
-
-		*grant = ResellerWalletGrant{
-			EventKey:   eventKey,
-			ResellerId: resellerId,
-			Amount:     amount,
-			Kind:       normalized,
-			Remark:     remark,
-			OperatorId: operatorId,
-			CreatedAt:  common.GetTimestamp(),
-		}
-		return tx.Create(grant).Error
+		*grant = *granted
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	_ = invalidateUserCache(resellerId)
+	return grant, nil
+}
+
+// grantResellerWalletTx credits a reseller wallet inside an existing
+// transaction. It performs no idempotency lookup: callers that need replay
+// protection resolve their own event key first, so a settlement confirmation
+// can share one transaction with the grant it produces.
+func grantResellerWalletTx(tx *gorm.DB, resellerId, operatorId int, amount int64, kind, remark, eventKey string) (*ResellerWalletGrant, error) {
+	if resellerId <= 0 || amount <= 0 || amount > int64(common.MaxWalletQuota) || eventKey == "" {
+		return nil, ErrResellerGrantInvalid
+	}
+	normalized, err := NormalizeResellerGrantKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	var user User
+	if err := lockForUpdate(tx).First(&user, resellerId).Error; err != nil {
+		return nil, err
+	}
+	if err := changeBillingWallet(tx, &user, amount); err != nil {
+		return nil, err
+	}
+	entry := BillingEntry{
+		EventKey:    "reseller:grant:" + strconv.Itoa(resellerId) + ":" + eventKey,
+		Kind:        "funding",
+		WalletDelta: amount,
+		ActorID:     operatorId,
+	}
+	if err := appendBillingEntry(tx, &user, &entry); err != nil {
+		return nil, err
+	}
+	grant := &ResellerWalletGrant{
+		EventKey:   eventKey,
+		ResellerId: resellerId,
+		Amount:     amount,
+		Kind:       normalized,
+		Remark:     truncateResellerText(remark, 255),
+		OperatorId: operatorId,
+		CreatedAt:  common.GetTimestamp(),
+	}
+	if err := tx.Create(grant).Error; err != nil {
+		return nil, err
+	}
 	return grant, nil
 }
 

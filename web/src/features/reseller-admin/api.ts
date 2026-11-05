@@ -249,3 +249,97 @@ export async function grantResellerWallet(payload: {
 }
 
 export { ROLE }
+
+// ---------------------------------------------------------------------------
+// Settlement ledger
+// ---------------------------------------------------------------------------
+
+export interface ResellerSettlementRow {
+  id: number
+  event_key: string
+  reseller_id: number
+  direction: 'in' | 'out'
+  status: 'pending' | 'confirmed' | 'void'
+  currency: string
+  amount_minor: number
+  exchange_rate: string
+  quota_amount: number
+  kind: 'recharge' | 'precredit'
+  method: string
+  external_ref: string
+  proof_url: string
+  remark: string
+  grant_id: number
+  created_by: number
+  confirmed_by: number
+  confirmed_at: number
+  created_at: number
+}
+
+export interface ResellerSettlementTotalsRow {
+  received_minor: number
+  confirmed_minor: number
+  pending_minor: number
+  credited_quota: number
+  pending_count: number
+}
+
+export interface ResellerSettlementBundle {
+  items: ResellerSettlementRow[]
+  totals: ResellerSettlementTotalsRow
+}
+
+export async function listResellerSettlements(resellerId: number, limit = 50) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerSettlementBundle>>(
+        '/api/user/reseller/settlements',
+        { params: { reseller_id: resellerId, limit } }
+      )
+    ).data
+  )
+}
+
+export async function createResellerSettlement(payload: {
+  reseller_id: number
+  direction: 'in' | 'out'
+  currency: string
+  amount_minor: number
+  exchange_rate?: string
+  quota: number
+  kind: 'recharge' | 'precredit'
+  method?: string
+  external_ref?: string
+  proof_url?: string
+  remark?: string
+  event_key?: string
+}) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerSettlementRow>>(
+        '/api/user/reseller/settlements',
+        payload
+      )
+    ).data
+  )
+}
+
+export async function confirmResellerSettlement(id: number) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerSettlementRow>>(
+        `/api/user/reseller/settlements/${id}/confirm`
+      )
+    ).data
+  )
+}
+
+export async function voidResellerSettlement(id: number) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerSettlementRow>>(
+        `/api/user/reseller/settlements/${id}/void`
+      )
+    ).data
+  )
+}

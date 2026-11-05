@@ -19,13 +19,19 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 import type {
+  ResellerAuditRow,
   ResellerCustomer,
   ResellerCustomerDetail,
   ResellerCustomerGroup,
+  ResellerDashboard,
+  ResellerGrantBundle,
   ResellerLogRow,
   ResellerMarginDay,
   ResellerPriceBook,
+  ResellerQuotaAlert,
+  ResellerSettlement,
   ResellerSummary,
+  ResellerTemplateBundle,
   ResellerTransfer,
   ResellerUsageRow,
 } from './types'
@@ -312,5 +318,119 @@ export async function getResellerTasks(params: {
         params,
       })
     ).data
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Grants, settlements, dashboard, templates and alerts
+// ---------------------------------------------------------------------------
+
+export async function getResellerGrants(limit = 50) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerGrantBundle>>('/api/reseller/grants', {
+        params: { limit },
+      })
+    ).data
+  )
+}
+
+export async function getResellerSettlements(params: {
+  status?: string
+  limit?: number
+}) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerSettlement[]>>(
+        '/api/reseller/settlements',
+        { params }
+      )
+    ).data
+  )
+}
+
+export function resellerSettlementExportURL() {
+  return '/api/reseller/settlements/export'
+}
+
+export async function getResellerDashboard(days = 7) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerDashboard>>('/api/reseller/dashboard', {
+        params: { days },
+      })
+    ).data
+  )
+}
+
+export async function getResellerAudit(limit = 50) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerAuditRow[]>>('/api/reseller/audit', {
+        params: { limit },
+      })
+    ).data
+  )
+}
+
+export async function getResellerTemplates() {
+  return unwrap(
+    (
+      await api.get<Response<ResellerTemplateBundle>>('/api/reseller/templates')
+    ).data
+  )
+}
+
+export async function saveResellerTemplate(payload: {
+  id?: number
+  name: string
+  remark?: string
+  items: Record<string, string>
+}) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerPriceTemplate>>(
+        '/api/reseller/templates',
+        payload
+      )
+    ).data
+  )
+}
+
+export async function deleteResellerTemplate(id: number) {
+  return (
+    await api.delete<Response<null>>(`/api/reseller/templates/${id}`)
+  ).data
+}
+
+export async function applyResellerTemplate(payload: {
+  template_id: number
+  customer_ids: number[]
+}) {
+  return unwrap(
+    (
+      await api.post<Response<{ applied: number }>>(
+        '/api/reseller/templates/apply',
+        payload
+      )
+    ).data
+  )
+}
+
+export async function getResellerQuotaAlert() {
+  return unwrap(
+    (await api.get<Response<ResellerQuotaAlert>>('/api/reseller/alert')).data
+  )
+}
+
+export async function setResellerQuotaAlert(payload: {
+  enabled: boolean
+  threshold_quota: number
+  notify_email?: string
+  cooldown_hours?: number
+}) {
+  return unwrap(
+    (await api.put<Response<ResellerQuotaAlert>>('/api/reseller/alert', payload))
+      .data
   )
 }

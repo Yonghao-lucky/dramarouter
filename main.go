@@ -173,6 +173,7 @@ func main() {
 	assetLibraryService.StartAssetRequestLogWriter()
 	assetLibraryService.StartSyncTask()
 	service.StartWebhookDeliveryTask()
+	service.StartResellerQuotaAlertTask()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true

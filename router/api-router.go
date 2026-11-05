@@ -248,6 +248,10 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/reseller/profiles", controller.AdminListResellers)
 				adminRoute.GET("/reseller/overview", controller.AdminResellerOverview)
 				adminRoute.GET("/reseller/grants", controller.AdminResellerGrants)
+				adminRoute.GET("/reseller/settlements", controller.AdminResellerSettlements)
+				adminRoute.POST("/reseller/settlements", controller.AdminCreateResellerSettlement)
+				adminRoute.POST("/reseller/settlements/:id/confirm", controller.AdminConfirmResellerSettlement)
+				adminRoute.POST("/reseller/settlements/:id/void", controller.AdminVoidResellerSettlement)
 				adminRoute.POST("/reseller/grant", controller.AdminGrantResellerWallet)
 				adminRoute.GET("/reseller/book", controller.AdminResellerPriceBook)
 				adminRoute.GET("/reseller/customers", controller.AdminResellerCustomers)
@@ -288,6 +292,21 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.POST("/margins/claim", controller.ResellerClaimMargin)
 			resellerRoute.GET("/price-book", controller.ResellerPriceBook)
 			resellerRoute.GET("/groups", controller.ResellerPlatformGroups)
+			// Grant and settlement visibility: a reseller can see what the
+			// platform credited it, including unpaid pre-credit.
+			resellerRoute.GET("/grants", controller.ResellerGrants)
+			resellerRoute.GET("/settlements", controller.ResellerSettlements)
+			resellerRoute.GET("/settlements/export", controller.ResellerSettlementExport)
+			// Customer analytics, scoped to customers this reseller owns.
+			resellerRoute.GET("/dashboard", controller.ResellerDashboard)
+			resellerRoute.GET("/audit", controller.ResellerAuditTrail)
+			// Reusable per-group price templates and low-balance mail alerts.
+			resellerRoute.GET("/templates", controller.ResellerPriceTemplates)
+			resellerRoute.POST("/templates", controller.ResellerSavePriceTemplate)
+			resellerRoute.POST("/templates/apply", controller.ResellerApplyPriceTemplate)
+			resellerRoute.DELETE("/templates/:id", controller.ResellerDeletePriceTemplate)
+			resellerRoute.GET("/alert", controller.ResellerQuotaAlert)
+			resellerRoute.PUT("/alert", controller.ResellerSetQuotaAlert)
 		}
 
 		// Subscription billing (plans, purchase, admin management)

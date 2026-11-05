@@ -50,9 +50,12 @@ import {
   type ResellerProfile,
   upsertResellerProfile,
 } from './api'
+import { PanelBoundary } from '@/features/reseller/panel-boundary'
+
 import { GrantDialog } from './grant-dialog'
 import { GrantsTable } from './grants-table'
 import { OverviewPanel } from './overview-panel'
+import { SettlementPanel } from './settlement-panel'
 
 const QUOTA_PER_UNIT = 500000
 
@@ -543,7 +546,10 @@ export function ResellerAdmin() {
                   />
                 </CardContent>
               </Card>
-              <ProfileBook resellerId={selected.reseller_id} />
+              <SettlementPanel resellerId={selected.reseller_id} />
+              <PanelBoundary title={t('Price book')}>
+                <ProfileBook resellerId={selected.reseller_id} />
+              </PanelBoundary>
             </div>
           ) : null}
         </div>

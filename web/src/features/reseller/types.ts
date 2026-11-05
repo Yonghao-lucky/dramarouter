@@ -135,3 +135,125 @@ export interface ResellerLogRow {
   duration?: number
   is_stream?: boolean
 }
+
+/** One settlement row: money between the platform and this reseller. */
+export interface ResellerSettlement {
+  id: number
+  event_key: string
+  reseller_id: number
+  direction: 'in' | 'out'
+  status: 'pending' | 'confirmed' | 'void'
+  currency: string
+  amount_minor: number
+  exchange_rate: string
+  quota_amount: number
+  kind: 'recharge' | 'precredit'
+  method: string
+  external_ref: string
+  proof_url: string
+  remark: string
+  grant_id: number
+  created_by: number
+  confirmed_by: number
+  confirmed_at: number
+  voided_at: number
+  created_at: number
+}
+
+export interface ResellerSettlementTotals {
+  received_minor: number
+  confirmed_minor: number
+  pending_minor: number
+  credited_quota: number
+  pending_count: number
+}
+
+/** A platform top-up credited to this reseller wallet. */
+export interface ResellerWalletGrantRow {
+  id: number
+  event_key: string
+  reseller_id: number
+  amount: number
+  kind: 'recharge' | 'precredit'
+  remark: string
+  operator_id: number
+  created_at: number
+}
+
+export interface ResellerGrantBundle {
+  items: ResellerWalletGrantRow[]
+  totals: ResellerSettlementTotals
+}
+
+export interface ResellerDashboardTopCustomer {
+  user_id: number
+  username: string
+  display_name: string
+  revenue_quota: number
+  request_count: number
+  balance_quota: number
+}
+
+export interface ResellerDashboardModelRow {
+  model_name: string
+  revenue_quota: number
+  request_count: number
+  customer_count: number
+}
+
+/** Owned-customer analytics. Every figure is scoped to the caller. */
+export interface ResellerDashboard {
+  customer_count: number
+  active_count: number
+  total_balance_quota: number
+  revenue_quota: number
+  request_count: number
+  used_quota: number
+  average_per_request: number
+  window_days: number
+  top_customers: ResellerDashboardTopCustomer[]
+  by_model: ResellerDashboardModelRow[]
+  by_day: ResellerMarginDay[]
+}
+
+export interface ResellerAuditRow {
+  id: number
+  operator_id: number
+  username: string
+  action: string
+  detail: string
+  ip: string
+  created_at: number
+}
+
+export interface ResellerTemplateItem {
+  id: number
+  template_id: number
+  group: string
+  ratio: string
+}
+
+export interface ResellerPriceTemplate {
+  id: number
+  reseller_id: number
+  name: string
+  remark: string
+  created_by: number
+  created_at: number
+  updated_at: number
+}
+
+export interface ResellerTemplateBundle {
+  templates: ResellerPriceTemplate[]
+  items: Record<string, ResellerTemplateItem[]>
+}
+
+export interface ResellerQuotaAlert {
+  id: number
+  reseller_id: number
+  enabled: boolean
+  threshold_quota: number
+  notify_email: string
+  cooldown_hours: number
+  updated_at: number
+}

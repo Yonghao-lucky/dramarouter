@@ -103,6 +103,87 @@ export function OverviewPanel(props: OverviewPanelProps) {
         />
       </div>
 
+      {/* Narrow screens get cards; the twelve-column table stays on desktop. */}
+      <div className='flex flex-col gap-2 md:hidden'>
+        {props.loading ? (
+          <Skeleton className='h-24 w-full' />
+        ) : null}
+        {!props.loading
+          ? props.rows.map((row) => (
+              <Card
+                key={row.reseller_id}
+                className={cn(
+                  props.selectedId === row.reseller_id && 'bg-muted/40'
+                )}
+              >
+                <CardContent className='flex flex-col gap-2 py-3'>
+                  <div className='flex items-start justify-between gap-2'>
+                    <div className='flex flex-col'>
+                      <span className='font-medium'>{row.username}</span>
+                      <span className='text-muted-foreground text-xs'>
+                        {row.display_name || row.name || `#${row.reseller_id}`}
+                      </span>
+                    </div>
+                    <Badge variant={row.status === 2 ? 'default' : 'secondary'}>
+                      {row.status === 2 ? t('Enabled') : t('Disabled')}
+                    </Badge>
+                  </div>
+                  <div className='grid grid-cols-2 gap-2 text-xs'>
+                    <div>
+                      <div className='text-muted-foreground'>{t('Wallet')}</div>
+                      <div className='tabular-nums'>
+                        {formatQuota(row.wallet_quota)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className='text-muted-foreground'>
+                        {t('Customers')}
+                      </div>
+                      <div className='tabular-nums'>{row.customer_count}</div>
+                    </div>
+                    <div>
+                      <div className='text-muted-foreground'>{t('Revenue')}</div>
+                      <div className='tabular-nums'>
+                        {formatQuota(row.revenue_quota)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className='text-muted-foreground'>{t('Margin')}</div>
+                      <div className='tabular-nums'>
+                        {formatQuota(row.margin_quota)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className='flex flex-wrap gap-1'>
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      onClick={() => props.onSelect(row.reseller_id)}
+                    >
+                      {t('Manage')}
+                    </Button>
+                    <Button
+                      size='sm'
+                      variant='ghost'
+                      onClick={() => props.onTopUp(row)}
+                    >
+                      {t('Top up')}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          : null}
+        {!props.loading && props.rows.length === 0 ? (
+          <Card>
+            <CardContent className='text-muted-foreground py-8 text-center text-sm'>
+              {t('No resellers yet')}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+
+      <div className='hidden md:block'>
       <Table>
         <TableHeader>
           <TableRow>
@@ -233,6 +314,7 @@ export function OverviewPanel(props: OverviewPanelProps) {
           ) : null}
         </TableBody>
       </Table>
+      </div>
     </div>
   )
 }
