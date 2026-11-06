@@ -329,6 +329,7 @@ func migrateDB() error {
 		&ResellerTransfer{}, &ResellerMarginCreditCursor{}, &ResellerWalletGrant{},
 		&ResellerSettlement{}, &ResellerPriceTemplate{}, &ResellerPriceTemplateItem{},
 		&ResellerQuotaAlert{}, &ResellerQuotaAlertSent{}, &ResellerGroupOrder{},
+		&ResellerFundingReceipt{}, &ResellerFundingReceiptItem{},
 		&BillingStatement{}, &BillingStatementEvent{}, &BillingArtifact{}, &BillingHistoryImport{},
 		&Channel{},
 		&Token{},

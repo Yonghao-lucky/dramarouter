@@ -142,6 +142,194 @@ func writeSettlementError(c *gin.Context, err error) {
 	}
 }
 
+func writeFundingReceiptError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, model.ErrResellerReceiptInvalid):
+		common.ApiErrorMsg(c, "invalid funding receipt")
+	case errors.Is(err, model.ErrResellerReceiptConflict):
+		common.ApiErrorMsg(c, "funding receipt is not pending")
+	case errors.Is(err, model.ErrResellerReceiptTransfer):
+		common.ApiErrorMsg(c, "a selected transfer cannot be reconciled")
+	case errors.Is(err, model.ErrResellerGrantReplay):
+		common.ApiErrorMsg(c, "this event key belongs to another reseller")
+	default:
+		common.ApiError(c, err)
+	}
+}
+
+type fundingReceiptRequest struct {
+	CustomerUserId int     `json:"customer_user_id"`
+	TransferIds    []int64 `json:"transfer_ids"`
+	Method         string  `json:"method"`
+	ExternalRef    string  `json:"external_ref"`
+	Remark         string  `json:"remark"`
+	Confirm        bool    `json:"confirm"`
+	EventKey       string  `json:"event_key"`
+}
+
+// ResellerCreateFundingReceipt reconciles a batch of the caller's own
+// precredit transfers into one receipt. The reseller id comes from the session,
+// so a console request can never settle another reseller's credit.
+func ResellerCreateFundingReceipt(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	var req fundingReceiptRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "invalid funding receipt")
+		return
+	}
+	if _, ok := requireOwnedCustomerBody(c, profile.UserId, req.CustomerUserId); !ok {
+		return
+	}
+	if req.EventKey == "" {
+		req.EventKey = common.NewRequestId()
+	}
+	row, err := model.CreateResellerFundingReceipt(model.ResellerFundingReceiptRequest{
+		EventKey:       req.EventKey,
+		ResellerId:     profile.UserId,
+		CustomerUserId: req.CustomerUserId,
+		TransferIds:    req.TransferIds,
+		Method:         req.Method,
+		ExternalRef:    req.ExternalRef,
+		Remark:         req.Remark,
+		ActorId:        profile.UserId,
+		Confirm:        req.Confirm,
+	})
+	if err != nil {
+		writeFundingReceiptError(c, err)
+		return
+	}
+	recordResellerAudit(c, profile.UserId, "reseller.funding.receipt", map[string]interface{}{
+		"receipt_id":    row.Id,
+		"customer_id":   row.CustomerUserId,
+		"quota_total":   row.QuotaTotal,
+		"transfer_num":  row.TransferCount,
+		"external_ref":  row.ExternalRef,
+	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": row})
+}
+
+// ResellerConfirmFundingReceipt marks a precredit batch as paid.
+func ResellerConfirmFundingReceipt(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "invalid receipt id")
+		return
+	}
+	row, err := model.ResellerFundingReceiptForReseller(id, profile.UserId)
+	if err != nil || row == nil {
+		common.ApiErrorMsg(c, "receipt not found")
+		return
+	}
+	confirmed, err := model.ConfirmResellerFundingReceipt(id, profile.UserId)
+	if err != nil {
+		writeFundingReceiptError(c, err)
+		return
+	}
+	recordResellerAudit(c, profile.UserId, "reseller.funding.confirm", map[string]interface{}{
+		"receipt_id": id,
+	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": confirmed})
+}
+
+// ResellerVoidFundingReceipt releases a pending receipt so its transfers can be
+// re-batched against a corrected statement.
+func ResellerVoidFundingReceipt(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "invalid receipt id")
+		return
+	}
+	row, err := model.ResellerFundingReceiptForReseller(id, profile.UserId)
+	if err != nil || row == nil {
+		common.ApiErrorMsg(c, "receipt not found")
+		return
+	}
+	voided, err := model.VoidResellerFundingReceipt(id, profile.UserId)
+	if err != nil {
+		writeFundingReceiptError(c, err)
+		return
+	}
+	recordResellerAudit(c, profile.UserId, "reseller.funding.void", map[string]interface{}{
+		"receipt_id": id,
+	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": voided})
+}
+
+// ResellerFundingReceipts lists the caller's receipts, optionally for one
+// customer.
+func ResellerFundingReceipts(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	customerId, _ := strconv.Atoi(c.DefaultQuery("customer_id", "0"))
+	if customerId > 0 {
+		if _, ok := requireOwnedCustomerBody(c, profile.UserId, customerId); !ok {
+			return
+		}
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	rows, err := model.ListResellerFundingReceipts(profile.UserId, customerId, limit)
+	if err != nil {
+		writeFundingReceiptError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
+}
+
+// ResellerUnreconciledPrecredits lists the precredits of one owned customer
+// that no live receipt covers yet — the candidates for a batch.
+func ResellerUnreconciledPrecredits(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	customerId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || customerId <= 0 {
+		common.ApiErrorMsg(c, "invalid customer id")
+		return
+	}
+	if _, ok := requireOwnedCustomerBody(c, profile.UserId, customerId); !ok {
+		return
+	}
+	rows, err := model.ListUnreconciledPrecredits(profile.UserId, customerId, 200)
+	if err != nil {
+		writeFundingReceiptError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
+}
+
+// requireOwnedCustomerBody is the body-parameter form of requireOwnedCustomer:
+// these endpoints take the customer id in JSON rather than the path.
+func requireOwnedCustomerBody(c *gin.Context, resellerUserId, customerId int) (int, bool) {
+	if customerId <= 0 {
+		common.ApiErrorMsg(c, "invalid customer id")
+		return 0, false
+	}
+	owner, err := model.GetResellerCustomerOwner(customerId)
+	if err != nil {
+		common.ApiError(c, err)
+		return 0, false
+	}
+	if owner != resellerUserId {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "customer is not owned by this reseller"})
+		return 0, false
+	}
+	return customerId, true
+}
+
 // ---------------------------------------------------------------------------
 // Settlement ledger (reseller console, read-only)
 // ---------------------------------------------------------------------------

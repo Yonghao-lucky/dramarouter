@@ -32,6 +32,7 @@ import type {
   ResellerSettlement,
   ResellerPriceTemplate,
   ResellerQuotaDataRow,
+  ResellerFundingReceipt,
   ResellerSummary,
   ResellerTemplateBundle,
   ResellerTransfer,
@@ -195,6 +196,69 @@ export async function getResellerPlatformGroups() {
   )
 }
 
+/** Precredits of one customer that no live receipt covers yet. */
+export async function getUnreconciledPrecredits(customerId: number) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerTransfer[]>>(
+        `/api/reseller/customers/${customerId}/precredits`
+      )
+    ).data
+  )
+}
+
+export async function getFundingReceipts(params: {
+  customer_id?: number
+  limit?: number
+}) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerFundingReceipt[]>>(
+        '/api/reseller/funding-receipts',
+        { params }
+      )
+    ).data
+  )
+}
+
+export async function createFundingReceipt(payload: {
+  customer_user_id: number
+  transfer_ids: number[]
+  method: string
+  external_ref: string
+  remark?: string
+  confirm?: boolean
+}) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerFundingReceipt>>(
+        '/api/reseller/funding-receipts',
+        payload
+      )
+    ).data
+  )
+}
+
+export async function confirmFundingReceipt(receiptId: number) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerFundingReceipt>>(
+        `/api/reseller/funding-receipts/${receiptId}/confirm`
+      )
+    ).data
+  )
+}
+
+export async function voidFundingReceipt(receiptId: number) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerFundingReceipt>>(
+        `/api/reseller/funding-receipts/${receiptId}/void`
+      )
+    ).data
+  )
+}
+
 export async function setResellerCustomerPrice(
   customerId: number,
   group: string,
@@ -219,6 +283,8 @@ export async function transferResellerQuota(
     // payload deliberately carries no group so a reseller cannot bill one
     // group's cost while the customer consumes at another.
     retail_quota: number
+    /** `recharge` (already paid) or `precredit` (on credit, settled later). */
+    kind?: 'recharge' | 'precredit'
     remark?: string
     event_key?: string
   }

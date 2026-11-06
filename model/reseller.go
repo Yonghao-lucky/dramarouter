@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -21,6 +22,24 @@ const (
 	ResellerTransferFund    = "fund"
 	ResellerTransferReclaim = "reclaim"
 )
+
+// Funding kinds. A recharge is money the reseller has already paid for; a
+// precredit (授信) is quota handed to the customer on credit, which the reseller
+// settles against a bank statement later. The kind only classifies a transfer,
+// it never changes the 1:1 movement.
+const (
+	ResellerFundingRecharge  = "recharge"
+	ResellerFundingPrecredit = "precredit"
+)
+
+// NormalizeResellerFundingKind validates a funding kind, defaulting to recharge
+// because an unlabelled transfer is by far the common case.
+func NormalizeResellerFundingKind(kind string) string {
+	if strings.TrimSpace(kind) == ResellerFundingPrecredit {
+		return ResellerFundingPrecredit
+	}
+	return ResellerFundingRecharge
+}
 
 var (
 	ErrResellerNotEnabled       = errors.New("not an enabled reseller")
@@ -123,8 +142,11 @@ type ResellerTransfer struct {
 	RetailRatio    string `json:"retail_ratio" gorm:"type:varchar(64)"`
 	CostRatio      string `json:"cost_ratio" gorm:"type:varchar(64)"`
 	OperatorId     int    `json:"operator_id"`
-	Remark         string `json:"remark" gorm:"type:varchar(255)"`
-	CreatedAt      int64  `json:"created_at" gorm:"bigint;index:idx_reseller_transfer_time,priority:1"`
+	// Kind classifies funding as a paid recharge or a precredit awaiting
+	// settlement. Reclaims carry the kind of the funding they reverse.
+	Kind      string `json:"kind" gorm:"type:varchar(16);index"`
+	Remark    string `json:"remark" gorm:"type:varchar(255)"`
+	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_reseller_transfer_time,priority:1"`
 }
 
 func (*ResellerTransfer) BeforeUpdate(*gorm.DB) error { return ErrBillingEvidenceImmutable }
@@ -273,13 +295,14 @@ func resellerRemainingTransfer(tx *gorm.DB, resellerUserId, customerUserId int) 
 // reseller's profit is instead the spread between the retail price it set and
 // its own wholesale cost for the group actually used, which the billing path
 // records per request and the margin rollup credits back to the reseller wallet.
-func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direction string, retailQuota int64, eventKey, remark string) (*ResellerTransfer, error) {
+func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direction string, retailQuota int64, eventKey, kind, remark string) (*ResellerTransfer, error) {
 	if resellerUserId <= 0 || customerUserId <= 0 || retailQuota <= 0 || eventKey == "" {
 		return nil, ErrResellerTransferInvalid
 	}
 	if retailQuota > int64(common.MaxQuota) {
 		return nil, ErrResellerTransferInvalid
 	}
+	fundingKind := NormalizeResellerFundingKind(kind)
 	transfer := &ResellerTransfer{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var existing ResellerTransfer
@@ -388,6 +411,7 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 			RetailRatio:    "1",
 			CostRatio:      "1",
 			OperatorId:     operatorId,
+			Kind:           fundingKind,
 			Remark:         remark,
 			CreatedAt:      common.GetTimestamp(),
 		}

@@ -58,7 +58,29 @@ export interface ResellerTransfer {
   retail_ratio: string
   cost_ratio: string
   operator_id: number
+  /** `recharge` (already paid) or `precredit` (on credit, settled later). */
+  kind?: 'recharge' | 'precredit'
   remark: string
+  created_at: number
+}
+
+/** One reconciliation record covering a batch of precredit transfers. */
+export interface ResellerFundingReceipt {
+  id: number
+  event_key: string
+  reseller_id: number
+  customer_user_id: number
+  status: 'pending' | 'confirmed' | 'void'
+  method: string
+  external_ref: string
+  remark: string
+  quota_total: number
+  transfer_count: number
+  created_by: number
+  confirmed_by: number
+  confirmed_at: number
+  voided_by: number
+  voided_at: number
   created_at: number
 }
 

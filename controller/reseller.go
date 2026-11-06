@@ -350,7 +350,7 @@ func AdminTransferResellerQuota(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid transfer request")
 		return
 	}
-	transfer, err := model.TransferResellerQuota(req.ResellerId, req.CustomerUserId, c.GetInt("id"), req.Direction, req.RetailQuota, req.EventKey, req.Remark)
+	transfer, err := model.TransferResellerQuota(req.ResellerId, req.CustomerUserId, c.GetInt("id"), req.Direction, req.RetailQuota, req.EventKey, req.Kind, req.Remark)
 	if err != nil {
 		writeResellerError(c, err)
 		return
@@ -368,6 +368,7 @@ type transferRequest struct {
 	Direction      string `json:"direction"`
 	RetailQuota    int64  `json:"retail_quota"`
 	EventKey       string `json:"event_key"`
+	Kind           string `json:"kind"`
 	Remark         string `json:"remark"`
 }
 
@@ -599,6 +600,7 @@ func ResellerTransfer(c *gin.Context) {
 		Direction   string `json:"direction"`
 		RetailQuota int64  `json:"retail_quota"`
 		EventKey    string `json:"event_key"`
+		Kind        string `json:"kind"`
 		Remark      string `json:"remark"`
 	}
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
@@ -608,7 +610,7 @@ func ResellerTransfer(c *gin.Context) {
 	if req.EventKey == "" {
 		req.EventKey = common.NewRequestId()
 	}
-	transfer, err := model.TransferResellerQuota(profile.UserId, customerId, profile.UserId, req.Direction, req.RetailQuota, req.EventKey, strings.TrimSpace(req.Remark))
+	transfer, err := model.TransferResellerQuota(profile.UserId, customerId, profile.UserId, req.Direction, req.RetailQuota, req.EventKey, req.Kind, strings.TrimSpace(req.Remark))
 	if err != nil {
 		writeResellerError(c, err)
 		return

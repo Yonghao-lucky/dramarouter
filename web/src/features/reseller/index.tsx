@@ -16,10 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Drag01Icon } from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Reorder, useDragControls } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -28,6 +25,7 @@ import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -57,12 +55,17 @@ import {
   parseQuotaFromDollars,
   quotaUnitsToEditableAmount,
 } from '@/lib/format'
-import { getLobeIcon } from '@/lib/lobe-icon'
+
+import { VendorGroupCards } from './components/vendor-group-cards'
 
 import {
   claimResellerMargin,
   saveResellerGroupOrder,
+  createFundingReceipt,
   createResellerCustomer,
+  getFundingReceipts,
+  getUnreconciledPrecredits,
+  voidFundingReceipt,
   getResellerCustomerDetail,
   getResellerCustomerGroups,
   getResellerCustomers,
@@ -181,6 +184,252 @@ function OverviewPanel() {
   )
 }
 
+function ReceiptStatusBadge(props: {
+  status: 'pending' | 'confirmed' | 'void'
+}) {
+  const { t } = useTranslation()
+  if (props.status === 'confirmed') {
+    return <Badge>{t('Received')}</Badge>
+  }
+  if (props.status === 'void') {
+    return <Badge variant='outline'>{t('Void')}</Badge>
+  }
+  return <Badge variant='secondary'>{t('Pending')}</Badge>
+}
+
+/**
+ * Precredit reconciliation: pick any number of the customer's unreceipted
+ * precredits, record how the money arrived (method + statement reference), and
+ * settle them together. The transfers themselves never change — this only
+ * records that one payment covered them.
+ */
+function FundingReceiptPanel(props: { customerId: number }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [selected, setSelected] = useState<number[]>([])
+  const [method, setMethod] = useState('bank')
+  const [externalRef, setExternalRef] = useState('')
+  const [remark, setRemark] = useState('')
+
+  const precredits = useQuery({
+    queryKey: ['reseller', 'precredits', props.customerId],
+    queryFn: () => getUnreconciledPrecredits(props.customerId),
+  })
+  const receipts = useQuery({
+    queryKey: ['reseller', 'funding-receipts', props.customerId],
+    queryFn: () => getFundingReceipts({ customer_id: props.customerId }),
+  })
+
+  const openRows = precredits.data ?? []
+  const selectedTotal = openRows
+    .filter((row) => selected.includes(row.id))
+    .reduce((sum, row) => sum + row.retail_quota, 0)
+
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: ['reseller'] })
+
+  const create = useMutation({
+    mutationFn: () =>
+      createFundingReceipt({
+        customer_user_id: props.customerId,
+        transfer_ids: selected,
+        method,
+        external_ref: externalRef.trim(),
+        remark: remark.trim() || undefined,
+        // Recording the receipt is the reconciliation act itself; a separate
+        // second click to "confirm" would only add friction to the same step.
+        confirm: true,
+      }),
+    onSuccess: () => {
+      toast.success(t('Precredit reconciled'))
+      setSelected([])
+      setExternalRef('')
+      setRemark('')
+      void refresh()
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+
+  const voidReceipt = useMutation({
+    mutationFn: (receiptId: number) => voidFundingReceipt(receiptId),
+    onSuccess: () => {
+      toast.success(t('Receipt voided'))
+      void refresh()
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+
+  const toggle = (id: number) => {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    )
+  }
+
+  return (
+    <div className='flex flex-col gap-3'>
+      <div className='flex items-baseline justify-between gap-2'>
+        <div className='text-sm font-medium'>
+          {t('Precredit reconciliation')}
+        </div>
+        <span className='text-muted-foreground text-xs'>
+          {t('{{count}} precredits awaiting a receipt', {
+            count: openRows.length,
+          })}
+        </span>
+      </div>
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'Select the precredits one payment covered, then record how it arrived. Merging several into one receipt keeps your statement matching one transfer.'
+        )}
+      </p>
+
+      <div className='grid gap-3 xl:grid-cols-2'>
+        <div className='min-h-0 rounded-lg border'>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className='w-10' />
+                <TableHead>{t('Time')}</TableHead>
+                <TableHead>{t('Quota')}</TableHead>
+                <TableHead>{t('Remark')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {openRows.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selected.includes(row.id)}
+                      onCheckedChange={() => toggle(row.id)}
+                      aria-label={t('Select precredit #{{id}}', {
+                        id: row.id,
+                      })}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {new Date(row.created_at * 1000).toLocaleString()}
+                  </TableCell>
+                  <TableCell className='tabular-nums'>
+                    {formatQuota(row.retail_quota)}
+                  </TableCell>
+                  <TableCell className='text-muted-foreground max-w-[16rem] truncate'>
+                    {row.remark || '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {openRows.length === 0 ? <EmptyRow colSpan={4} /> : null}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className='flex flex-col gap-2 rounded-lg border p-3'>
+          <div className='flex flex-wrap items-end gap-2'>
+            <Select
+              value={method}
+              onValueChange={(value) => {
+                if (value) setMethod(value)
+              }}
+            >
+              <SelectTrigger className='h-9 w-32'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value='bank'>{t('Bank transfer')}</SelectItem>
+                  <SelectItem value='alipay'>Alipay</SelectItem>
+                  <SelectItem value='wechat'>WeChat Pay</SelectItem>
+                  <SelectItem value='cash'>{t('Cash')}</SelectItem>
+                  <SelectItem value='other'>{t('Other')}</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Input
+              className='w-48'
+              placeholder={t('Statement / invoice number')}
+              maxLength={128}
+              value={externalRef}
+              onChange={(event) => setExternalRef(event.target.value)}
+            />
+            <Input
+              className='w-48'
+              placeholder={t('Remark (optional)')}
+              maxLength={255}
+              value={remark}
+              onChange={(event) => setRemark(event.target.value)}
+            />
+            <Button
+              disabled={
+                selected.length === 0 || create.isPending || !externalRef.trim()
+              }
+              onClick={() => create.mutate()}
+            >
+              {create.isPending
+                ? t('Reconciling')
+                : t('Reconcile {{count}} selected', { count: selected.length })}
+            </Button>
+          </div>
+          <p className='text-muted-foreground text-xs tabular-nums'>
+            {t('Selected total')}: {formatQuota(selectedTotal)}
+          </p>
+        </div>
+      </div>
+
+      <div className='min-h-0 rounded-lg border'>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('Time')}</TableHead>
+              <TableHead>{t('Quota')}</TableHead>
+              <TableHead>{t('Transfers')}</TableHead>
+              <TableHead>{t('Method')}</TableHead>
+              <TableHead>{t('Reference')}</TableHead>
+              <TableHead>{t('Status')}</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {(receipts.data ?? []).map((row) => (
+              <TableRow key={row.id}>
+                <TableCell>
+                  {new Date(row.created_at * 1000).toLocaleString()}
+                </TableCell>
+                <TableCell className='tabular-nums'>
+                  {formatQuota(row.quota_total)}
+                </TableCell>
+                <TableCell className='tabular-nums'>
+                  {row.transfer_count}
+                </TableCell>
+                <TableCell>{row.method || '—'}</TableCell>
+                <TableCell className='max-w-[12rem] truncate'>
+                  {row.external_ref || '—'}
+                </TableCell>
+                <TableCell>
+                  <ReceiptStatusBadge status={row.status} />
+                </TableCell>
+                <TableCell>
+                  {row.status === 'pending' ? (
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      disabled={voidReceipt.isPending}
+                      onClick={() => voidReceipt.mutate(row.id)}
+                    >
+                      {t('Void')}
+                    </Button>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            ))}
+            {(receipts.data ?? []).length === 0 ? (
+              <EmptyRow colSpan={7} />
+            ) : null}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  )
+}
+
 function CustomerDetailDialog(props: {
   customerId: number | null
   onClose: () => void
@@ -188,6 +437,11 @@ function CustomerDetailDialog(props: {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [fundAmount, setFundAmount] = useState('')
+  // A recharge is money already collected; a precredit is quota handed over on
+  // credit and reconciled against a statement later. Defaulting to recharge
+  // keeps the common case one click.
+  const [fundKind, setFundKind] = useState<'recharge' | 'precredit'>('recharge')
+  const [fundRemark, setFundRemark] = useState('')
   // Prices are edited one customer at a time. A draft keyed by group alone would
   // survive switching customers and be written to the next one, which looked
   // like "changing one customer changes every customer".
@@ -197,6 +451,8 @@ function CustomerDetailDialog(props: {
   useEffect(() => {
     setPriceDrafts({})
     setFundAmount('')
+    setFundRemark('')
+    setFundKind('recharge')
   }, [props.customerId])
 
   const detail = useQuery({
@@ -218,12 +474,16 @@ function CustomerDetailDialog(props: {
       transferResellerQuota(props.customerId as number, {
         direction,
         retail_quota: parseQuotaFromDollars(Number(fundAmount)),
+        // A reclaim reverses whatever was funded; only a fund carries a kind.
+        kind: direction === 'fund' ? fundKind : undefined,
+        remark: fundRemark.trim() || undefined,
       }),
     onSuccess: (_data, direction) => {
       toast.success(
         direction === 'fund' ? t('Quota transferred') : t('Quota reclaimed')
       )
       setFundAmount('')
+      setFundRemark('')
       void refresh()
     },
   })
@@ -298,6 +558,35 @@ function CustomerDetailDialog(props: {
                   value={fundAmount}
                   onChange={(event) => setFundAmount(event.target.value)}
                 />
+                <Select
+                  value={fundKind}
+                  onValueChange={(value) => {
+                    if (value === 'recharge' || value === 'precredit') {
+                      setFundKind(value)
+                    }
+                  }}
+                >
+                  <SelectTrigger className='h-9 w-32'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value='recharge'>
+                        {t('Recharge')}
+                      </SelectItem>
+                      <SelectItem value='precredit'>
+                        {t('Precredit')}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <Input
+                  className='w-48'
+                  placeholder={t('Remark (optional)')}
+                  maxLength={255}
+                  value={fundRemark}
+                  onChange={(event) => setFundRemark(event.target.value)}
+                />
                 <Badge variant='secondary' className='h-9 px-3 leading-9'>
                   {data.group}
                 </Badge>
@@ -319,6 +608,13 @@ function CustomerDetailDialog(props: {
                     'Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.'
                   )}
                 </p>
+                {fundKind === 'precredit' ? (
+                  <p className='text-muted-foreground basis-full text-xs'>
+                    {t(
+                      'Precredit hands the customer quota before you are paid. Reconcile the batch in the Precredit reconciliation section once the payment arrives.'
+                    )}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -332,45 +628,61 @@ function CustomerDetailDialog(props: {
                     'The default customer price is the platform group price. Set your own price only where you want a different one; the others stay at the platform price.'
                   )}
                 </p>
-                <div className='min-h-0 flex-1 overflow-y-auto rounded-lg border'>
-                  <Table>
-                    <TableHeader className='bg-popover sticky top-0 z-10'>
-                      <TableRow>
-                        <TableHead>{t('Group')}</TableHead>
-                        <TableHead>{t('My cost')}</TableHead>
-                        <TableHead>{t('Customer price')}</TableHead>
-                        <TableHead>{t('Margin')}</TableHead>
-                        <TableHead />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(groups.data ?? []).map((group) => {
-                        const retail = Number(
-                          priceDrafts[group.group] || group.ratio
-                        )
-                        const cost = Number(group.cost_ratio)
-                        const margin =
-                          retail > 0 && cost > 0
-                            ? `${(((retail - cost) / retail) * 100).toFixed(1)}%`
-                            : '—'
-                        return (
-                          <TableRow key={group.group}>
-                            <TableCell>
-                              <div className='flex items-center gap-1.5'>
-                                <span>{group.group}</span>
-                                {group.group === data.group ? (
-                                  <Badge variant='outline'>
-                                    {t('Current')}
-                                  </Badge>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                            <TableCell className='tabular-nums'>
-                              {group.cost_ratio || '—'}
-                            </TableCell>
-                            <TableCell>
+                <div className='min-h-0 flex-1 overflow-y-auto'>
+                  <VendorGroupCards
+                    rows={groups.data ?? []}
+                    renderRow={(group) => {
+                      const retail = Number(
+                        priceDrafts[group.group] ?? group.ratio
+                      )
+                      const cost = Number(group.cost_ratio)
+                      const margin =
+                        retail > 0 && cost > 0
+                          ? `${(((retail - cost) / retail) * 100).toFixed(1)}%`
+                          : ''
+                      return (
+                        <div className='flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs'>
+                          <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pr-8'>
+                            <div className='flex items-center gap-1.5'>
+                              <span className='text-base font-semibold tracking-tight'>
+                                {group.group}
+                              </span>
+                              {group.group === data.group ? (
+                                <Badge variant='outline'>
+                                  {t('Current')}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            {margin ? (
+                              <Badge variant='secondary' className='tabular-nums'>
+                                {t('Margin')} {margin}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          {group.description ? (
+                            <p className='text-muted-foreground text-xs leading-relaxed'>
+                              {group.description}
+                            </p>
+                          ) : null}
+                          <div className='flex flex-wrap items-end gap-x-4 gap-y-2 border-t pt-2'>
+                            <div className='flex flex-col'>
+                              <span className='text-muted-foreground text-[11px] uppercase'>
+                                {t('My cost')}
+                              </span>
+                              <span className='text-sm font-medium tabular-nums'>
+                                {group.cost_ratio || t('No cost set')}
+                              </span>
+                            </div>
+                            <div className='flex flex-col gap-1'>
+                              <label
+                                className='text-muted-foreground text-[11px] uppercase'
+                                htmlFor={`price-${group.group}`}
+                              >
+                                {t('Customer price')}
+                              </label>
                               <Input
-                                className='w-24'
+                                id={`price-${group.group}`}
+                                className='h-8 w-24'
                                 inputMode='decimal'
                                 placeholder={group.ratio || '—'}
                                 value={
@@ -391,37 +703,29 @@ function CustomerDetailDialog(props: {
                                   }
                                 }}
                               />
-                            </TableCell>
-                            <TableCell className='text-muted-foreground tabular-nums'>
-                              {margin}
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                size='sm'
-                                variant='outline'
-                                disabled={
-                                  !priceDrafts[group.group] ||
-                                  priceDrafts[group.group] ===
-                                    group.ratio ||
-                                  (savePrice.isPending &&
-                                    savePrice.variables === group.group)
-                                }
-                                onClick={() => savePrice.mutate(group.group)}
-                              >
-                                {savePrice.isPending &&
-                                savePrice.variables === group.group
-                                  ? t('Saving')
-                                  : t('Save')}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                      {(groups.data ?? []).length === 0 ? (
-                        <EmptyRow colSpan={5} />
-                      ) : null}
-                    </TableBody>
-                  </Table>
+                            </div>
+                            <Button
+                              size='sm'
+                              variant='outline'
+                              className='ml-auto'
+                              disabled={
+                                !priceDrafts[group.group] ||
+                                priceDrafts[group.group] === group.ratio ||
+                                (savePrice.isPending &&
+                                  savePrice.variables === group.group)
+                              }
+                              onClick={() => savePrice.mutate(group.group)}
+                            >
+                              {savePrice.isPending &&
+                              savePrice.variables === group.group
+                                ? t('Saving')
+                                : t('Save')}
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    }}
+                  />
                 </div>
               </div>
 
@@ -476,6 +780,8 @@ function CustomerDetailDialog(props: {
                 </div>
               </div>
             </div>
+
+            <FundingReceiptPanel customerId={props.customerId as number} />
           </div>
         ) : null}
       </DialogContent>
@@ -1241,32 +1547,6 @@ function ProfitPanel() {
   )
 }
 
-// GroupOrderItem binds dragging to the handle so the row content stays usable.
-function GroupOrderItem(props: { group: string; children: React.ReactNode }) {
-  const { t } = useTranslation()
-  const dragControls = useDragControls()
-  return (
-    <Reorder.Item
-      value={props.group}
-      dragListener={false}
-      dragControls={dragControls}
-      className='bg-background relative rounded-lg'
-    >
-      <Button
-        type='button'
-        variant='ghost'
-        size='icon-sm'
-        className='text-muted-foreground absolute top-2 right-2 cursor-grab touch-none active:cursor-grabbing'
-        aria-label={t('Drag {{group}} to reorder', { group: props.group })}
-        onPointerDown={(event) => dragControls.start(event)}
-      >
-        <HugeiconsIcon icon={Drag01Icon} strokeWidth={2} aria-hidden='true' />
-      </Button>
-      {props.children}
-    </Reorder.Item>
-  )
-}
-
 function PriceBookPanel() {
   const { t } = useTranslation()
   // The server returns the groups this reseller may actually price: visible to
@@ -1280,7 +1560,9 @@ function PriceBookPanel() {
 
   // Keep a local copy so a drag feels instant; rewrite it when the server list
   // changes (for example after the administrator reorders the same book).
-  const serverRows = groups.data ?? []
+  // Memoised on the query payload: `groups.data ?? []` would mint a fresh array
+  // every render and re-run the sync effect forever.
+  const serverRows = useMemo(() => groups.data ?? [], [groups.data])
   const queryClient = useQueryClient()
   const [orderedRows, setOrderedRows] = useState<ResellerCustomerGroup[]>([])
   useEffect(() => {
@@ -1300,113 +1582,70 @@ function PriceBookPanel() {
     },
   })
 
-  const sections = orderedRows.reduce<
-    { vendor: string; icon?: string; rows: ResellerCustomerGroup[] }[]
-  >((result, row) => {
-    const vendor = row.vendor || t('Other')
-    const last = result[result.length - 1]
-    if (last && last.vendor === vendor) last.rows.push(row)
-    else result.push({ vendor, icon: row.vendor_icon, rows: [row] })
-    return result
-  }, [])
-
-  const moveGroup = (vendor: string, rows: ResellerCustomerGroup[]) => {
-    const next = sections.flatMap((section) =>
-      section.vendor === vendor ? rows : section.rows
-    )
-    setOrderedRows(next)
-    saveOrder.mutate(next.map((row) => row.group))
-  }
-
-  if (sections.length === 0) {
+  if (orderedRows.length === 0) {
     return <EmptyRow colSpan={1} />
   }
 
   return (
-    <div className='grid gap-3 xl:grid-cols-2'>
-      {sections.map((section) => (
-        <Card key={section.vendor}>
-          <CardHeader className='pb-2'>
-            <CardTitle className='flex items-center gap-2 text-base'>
-              {section.icon ? getLobeIcon(section.icon, 20) : null}
-              {section.vendor}
-              <span className='text-muted-foreground text-xs font-normal'>
-                {t('{{count}} groups', { count: section.rows.length })}
+    <VendorGroupCards
+      rows={orderedRows}
+      onReorder={(order) => {
+        const byName = new Map(orderedRows.map((row) => [row.group, row]))
+        const next = order
+          .map((name) => byName.get(name))
+          .filter((row): row is ResellerCustomerGroup => row !== undefined)
+        setOrderedRows(next)
+        saveOrder.mutate(next.map((row) => row.group))
+      }}
+      renderRow={(row) => {
+        // The book is read at a glance to decide a price, so cost and
+        // standing price sit in labelled cells with real numbers instead
+        // of one muted sentence the reseller has to parse.
+        const cost = row.sellable ? row.cost_ratio : ''
+        const price = row.sellable ? row.ratio || row.cost_ratio : ''
+        const margin =
+          Number(cost) > 0 && Number(price) > 0
+            ? `${(((Number(price) - Number(cost)) / Number(price)) * 100).toFixed(1)}%`
+            : ''
+        return (
+          <div className='flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs'>
+            <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pr-8'>
+              <span className='text-base font-semibold tracking-tight'>
+                {row.group}
               </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className='flex flex-col gap-2'>
-            <Reorder.Group
-              axis='y'
-              values={section.rows.map((row) => row.group)}
-              onReorder={(order) => {
-                const byName = new Map(
-                  section.rows.map((row) => [row.group, row])
-                )
-                const next = order
-                  .map((name) => byName.get(name))
-                  .filter((row): row is ResellerCustomerGroup => row !== undefined)
-                moveGroup(section.vendor, next)
-              }}
-              className='flex flex-col gap-2'
-            >
-            {section.rows.map((row) => {
-              // The book is read at a glance to decide a price, so cost and
-              // standing price sit in labelled cells with real numbers instead
-              // of one muted sentence the reseller has to parse.
-              const cost = row.sellable ? row.cost_ratio : ''
-              const price = row.sellable
-                ? row.ratio || row.cost_ratio
-                : ''
-              const margin =
-                Number(cost) > 0 && Number(price) > 0
-                  ? `${(((Number(price) - Number(cost)) / Number(price)) * 100).toFixed(1)}%`
-                  : ''
-              return (
-              <GroupOrderItem key={row.group} group={row.group}>
-                <div className='flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs'>
-                  <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
-                    <span className='text-base font-semibold tracking-tight'>
-                      {row.group}
-                    </span>
-                    {margin ? (
-                      <Badge variant='secondary' className='tabular-nums'>
-                        {t('Margin')} {margin}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  {row.description ? (
-                    <p className='text-muted-foreground text-xs leading-relaxed'>
-                      {row.description}
-                    </p>
-                  ) : null}
-                  <div className='flex flex-wrap gap-x-6 gap-y-1 border-t pt-2'>
-                    <div className='flex flex-col'>
-                      <span className='text-muted-foreground text-[11px] uppercase'>
-                        {t('My cost')}
-                      </span>
-                      <span className='text-sm font-medium tabular-nums'>
-                        {cost || t('No cost set')}
-                      </span>
-                    </div>
-                    <div className='flex flex-col'>
-                      <span className='text-muted-foreground text-[11px] uppercase'>
-                        {t('Standing price')}
-                      </span>
-                      <span className='text-sm font-semibold tabular-nums'>
-                        {price || '—'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </GroupOrderItem>
-              )
-            })}
-            </Reorder.Group>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+              {margin ? (
+                <Badge variant='secondary' className='tabular-nums'>
+                  {t('Margin')} {margin}
+                </Badge>
+              ) : null}
+            </div>
+            {row.description ? (
+              <p className='text-muted-foreground text-xs leading-relaxed'>
+                {row.description}
+              </p>
+            ) : null}
+            <div className='flex flex-wrap gap-x-6 gap-y-1 border-t pt-2'>
+              <div className='flex flex-col'>
+                <span className='text-muted-foreground text-[11px] uppercase'>
+                  {t('My cost')}
+                </span>
+                <span className='text-sm font-medium tabular-nums'>
+                  {cost || t('No cost set')}
+                </span>
+              </div>
+              <div className='flex flex-col'>
+                <span className='text-muted-foreground text-[11px] uppercase'>
+                  {t('Standing price')}
+                </span>
+                <span className='text-sm font-semibold tabular-nums'>
+                  {price || '—'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )
+      }}
+    />
   )
 }
 

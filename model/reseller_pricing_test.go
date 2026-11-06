@@ -140,7 +140,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 
 	// Funding 10000 moves 10000 from the reseller and credits the customer 10000.
 	// The customer's group and the wholesale table play no part in the amount.
-	transfer, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 10000, "evt-fund-1", "seed")
+	transfer, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 10000, "evt-fund-1", "", "seed")
 	require.NoError(t, err)
 	assert.Equal(t, int64(10000), transfer.CostQuota)
 	assert.Equal(t, int64(10000), transfer.RetailQuota)
@@ -153,7 +153,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	assert.Equal(t, 10000, customerQuota)
 
 	// The same event key is idempotent: no second movement.
-	again, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 10000, "evt-fund-1", "seed")
+	again, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 10000, "evt-fund-1", "", "seed")
 	require.NoError(t, err)
 	assert.Equal(t, transfer.Id, again.Id)
 	resellerQuota, err = GetUserQuota(resellerID, true)
@@ -161,7 +161,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	assert.Equal(t, 100000-10000, resellerQuota)
 
 	// Reclaiming returns exactly what was moved back.
-	reclaim, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, 4000, "evt-reclaim-1", "unused")
+	reclaim, err := TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, 4000, "evt-reclaim-1", "", "unused")
 	require.NoError(t, err)
 	assert.Equal(t, int64(4000), reclaim.CostQuota)
 	resellerQuota, err = GetUserQuota(resellerID, true)
@@ -172,7 +172,7 @@ func TestResellerTransferMarginsAndReclaim(t *testing.T) {
 	assert.Equal(t, 6000, customerQuota)
 
 	// A reclaim cannot exceed the outstanding retail position.
-	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, 7000, "evt-reclaim-2", "too much")
+	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferReclaim, 7000, "evt-reclaim-2", "", "too much")
 	assert.ErrorIs(t, err, ErrResellerTransferInvalid)
 
 	reclaimable, err := ResellerReclaimableQuota(resellerID, customerID)
@@ -202,16 +202,16 @@ func TestResellerTransferGuards(t *testing.T) {
 	require.NoError(t, SetResellerCustomerOwner(ungroupedID, resellerID, resellerID, "seed"))
 	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.8", Enabled: true}).Error)
 
-	_, err := TransferResellerQuota(resellerID, otherID, resellerID, ResellerTransferFund, 1000, "evt-guard-own", "")
+	_, err := TransferResellerQuota(resellerID, otherID, resellerID, ResellerTransferFund, 1000, "evt-guard-own", "", "")
 	assert.ErrorIs(t, err, ErrResellerCustomerNotFound, "an unowned customer must never be funded")
 
 	// A customer is an ordinary account: funding works no matter which group it
 	// sits in, because the transfer is 1:1 and does not price the request.
-	funded, err := TransferResellerQuota(resellerID, ungroupedID, resellerID, ResellerTransferFund, 50, "evt-guard-group", "")
+	funded, err := TransferResellerQuota(resellerID, ungroupedID, resellerID, ResellerTransferFund, 50, "evt-guard-group", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, int64(50), funded.CostQuota)
 
-	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 1000, "evt-guard-wallet", "")
+	_, err = TransferResellerQuota(resellerID, customerID, resellerID, ResellerTransferFund, 1000, "evt-guard-wallet", "", "")
 	assert.ErrorIs(t, err, ErrResellerWalletShort, "the reseller must prepay the wholesale amount")
 }
 
@@ -314,10 +314,10 @@ func TestResellerTransferEventKeyCannotCrossTenants(t *testing.T) {
 	require.NoError(t, SetResellerCustomerOwner(customerA, resellerA, resellerA, "seed"))
 	require.NoError(t, SetResellerCustomerOwner(customerB, resellerB, resellerB, "seed"))
 
-	_, err := TransferResellerQuota(resellerA, customerA, resellerA, ResellerTransferFund, 5000, "evt-shared", "")
+	_, err := TransferResellerQuota(resellerA, customerA, resellerA, ResellerTransferFund, 5000, "evt-shared", "", "")
 	require.NoError(t, err)
 
-	_, err = TransferResellerQuota(resellerB, customerB, resellerB, ResellerTransferFund, 7000, "evt-shared", "")
+	_, err = TransferResellerQuota(resellerB, customerB, resellerB, ResellerTransferFund, 7000, "evt-shared", "", "")
 	assert.ErrorIs(t, err, ErrResellerTransferInvalid, "another tenant's event key must not replay")
 
 	quotaB, err := GetUserQuota(resellerB, true)
