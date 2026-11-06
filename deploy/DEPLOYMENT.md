@@ -92,8 +92,24 @@ Docker 网桥 `192.168.240.1/20`，因此 `TRUSTED_PROXIES` 必须是 `127.0.0.1
    docker build -t dramarouter:<提交sha> -t dramarouter:next .
 
 ③ 滚动更新（脚本会自动打 latest 标签并保留 prev 回滚点）
-   /opt/dramarouter-secrets/rollout.sh dramarouter:next
+   /opt/dramarouter-secrets/rollout.sh --site us dramarouter:next
 ```
+
+更新 open 站（realmrouter.com）时把镜像和站点一起换，生产站不受影响：
+
+```text
+docker build -t dramarouter-open:next .
+/opt/dramarouter-secrets/rollout.sh --site open dramarouter-open:next
+```
+
+`--site` 决定脚本操作哪一套容器和哪一份 upstream，两个站点除名字、端口、目录外流程完全一致：
+
+| `--site` | 域名 | 容器 | 端口 | upstream 文件 | 默认镜像 |
+| --- | --- | --- | --- | --- | --- |
+| `us`（默认） | realmdrama.com | dramarouter-us-a/-b | 14010/14011 | `00-dramarouter-us-upstream.conf` | `dramarouter:latest` |
+| `open` | realmrouter.com | dramarouter-open-a/-b | 14110/14111 | `00-dramarouter-open-upstream.conf` | `dramarouter-open:latest` |
+
+**不带 `--site` 时默认为 `us`**，与旧调用方式兼容。滚动前脚本会确认目标 upstream 与 compose 文件存在，写错站点名会直接退出而不是改到另一套配置。
 
 ### 滚动更新做了什么
 
@@ -162,12 +178,14 @@ curl -s https://realmdrama.com/v1/chat/completions \
 
 ## 三、回滚
 
-`rollout.sh` 打标签时会自动把上一版保存为 `dramarouter:prev`。
+`rollout.sh` 打标签时会自动把上一版保存为 `<镜像>:prev`（us 站是 `dramarouter:prev`，open 站是 `dramarouter-open:prev`）。
 
 ```bash
 docker tag dramarouter:prev dramarouter:latest
-/opt/dramarouter-secrets/rollout.sh
+/opt/dramarouter-secrets/rollout.sh --site us
 ```
+
+回滚 open 站同理，换成 `dramarouter-open:prev` 和 `--site open`。
 
 **回滚镜像不会回滚数据库结构。** 新版执行过 `AutoMigrate` 后，旧版代码面对新表结构通常能跑（多出没用的列），但若新版做过删列或改语义，回滚前先在测试库验证；真正危险的版本先备份数据库。
 
@@ -350,7 +368,7 @@ docker restart dramarouter-us-pg
 
 | 脚本 | 用途 |
 | --- | --- |
-| `rollout.sh` | 单机滚动更新，可传镜像名；自动保留 `dramarouter:prev` |
+| `rollout.sh` | 单机滚动更新，`--site us\|open` 选择站点，可传镜像名；自动保留 `<镜像>:prev` |
 | `apply-nginx.sh` | 复原 upstream + 两个站点代理配置 |
 | `health-watchdog.sh` | 按容器健康状态动态摘除/挂回后端，可配 cron 每分钟执行 |
 | `backup-pg.sh` | 每日 `pg_dump` 备份，保留 14 天 |

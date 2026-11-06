@@ -1,6 +1,10 @@
 #!/bin/bash
 # 单机滚动更新：一次只换一个容器，另一个始终在线，客户无感。
-# 用法: rollout.sh [镜像名]   默认 dramarouter:latest
+#
+# 用法:
+#   rollout.sh [镜像名]                 更新生产站（默认 us，兼容旧用法）
+#   rollout.sh --site open [镜像名]     更新 open 站（realmrouter.com）
+#   rollout.sh --site us [镜像名]       更新生产站（realmdrama.com）
 #
 # 任一步失败会自动回滚：恢复双后端 upstream，并把本次已重建的服务退回更新前镜像。
 # 环境变量:
@@ -8,31 +12,99 @@
 #   FORCE=1        两台不全是 healthy 时仍强制滚动（会放弃零停机保证）
 set -euo pipefail
 
-IMG="${1:-dramarouter:latest}"
-PROJ=/opt/1panel/docker/compose/dramarouter-us
-UP=/opt/1panel/www/conf.d/00-dramarouter-us-upstream.conf
+usage() {
+  cat >&2 <<'EOF'
+用法: rollout.sh [--site us|open] [镜像名]
+
+  --site us    生产站 realmdrama.com（容器 dramarouter-us-a/-b，端口 14010/14011）
+  --site open  open 站 realmrouter.com（容器 dramarouter-open-a/-b，端口 14110/14111）
+
+镜像名省略时使用该站点的默认 latest 标签。
+EOF
+}
+
+SITE=us
+IMG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --site)
+      [ $# -ge 2 ] || { echo "--site 需要一个值" >&2; usage; exit 2; }
+      SITE="$2"
+      shift 2
+      ;;
+    --site=*)
+      SITE="${1#--site=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "未知参数: $1" >&2
+      usage
+      exit 2
+      ;;
+    *)
+      IMG="$1"
+      shift
+      ;;
+  esac
+done
+
+# 两个站点除名字、端口、目录外流程完全一致，在这里集中声明差异。
+# UPSTREAM 必须和 1panel 生成的 upstream 名一致，写错会 reload 到旧配置而不报错。
+case "$SITE" in
+  us)
+    PROJ=/opt/1panel/docker/compose/dramarouter-us
+    UP=/opt/1panel/www/conf.d/00-dramarouter-us-upstream.conf
+    UPSTREAM=dramarouter_us
+    CONTAINERS=(dramarouter-us-a dramarouter-us-b)
+    PORTS=(14010 14011)
+    DEFAULT_IMG=dramarouter:latest
+    ;;
+  open)
+    PROJ=/opt/1panel/docker/compose/dramarouter-open
+    UP=/opt/1panel/www/conf.d/00-dramarouter-open-upstream.conf
+    UPSTREAM=dramarouter_open
+    CONTAINERS=(dramarouter-open-a dramarouter-open-b)
+    PORTS=(14110 14111)
+    DEFAULT_IMG=dramarouter-open:latest
+    ;;
+  *)
+    echo "未知站点: $SITE" >&2
+    usage
+    exit 2
+    ;;
+esac
+
+IMG="${IMG:-$DEFAULT_IMG}"
 CTR=1Panel-openresty-RqEz
 DRAIN_SECONDS="${DRAIN_SECONDS:-10}"
 
 SERVICES=(app-a app-b)
-CONTAINERS=(dramarouter-us-a dramarouter-us-b)
-PORTS=(14010 14011)
 
 # 本次运行中已重建的服务，失败时倒序回滚
 ROLLED=()
-# 更新前 dramarouter:latest 指向的镜像 ID，失败时把标签指回去
+# 更新前该站点 latest 指向的镜像 ID，失败时把标签指回去
 PREV_IMAGE=""
+
+# 两个站点共用同一个 openresty 容器；任何一处配置写错都会让另一个站点受影响，
+# 所以先确认目标文件确实存在，避免 cat > 到一个陌生路径。
+[ -f "$UP" ] || { echo "upstream 配置不存在: $UP" >&2; exit 1; }
+[ -f "$PROJ/compose.yml" ] || { echo "compose 文件不存在: $PROJ/compose.yml" >&2; exit 1; }
 
 docker image inspect "$IMG" >/dev/null 2>&1 || { echo "镜像不存在: $IMG"; exit 1; }
 
 # 以当前运行中的容器为准记录回滚镜像，比读标签更可靠（标签可能已被覆盖）
 PREV_IMAGE=$(docker inspect --format '{{.Image}}' "${CONTAINERS[0]}" 2>/dev/null || true)
 if [ -z "$PREV_IMAGE" ]; then
-  PREV_IMAGE=$(docker inspect --format '{{.Id}}' dramarouter:latest 2>/dev/null || true)
+  PREV_IMAGE=$(docker inspect --format '{{.Id}}' "$DEFAULT_IMG" 2>/dev/null || true)
 fi
 
 preflight() {
   local i st bad=0
+  echo "=== 站点 $SITE ($UPSTREAM)，镜像 $IMG"
   echo "=== 预检：两台都 healthy 才具备零停机条件"
   for i in 0 1; do
     st=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "${CONTAINERS[$i]}" 2>/dev/null || echo missing)
@@ -54,18 +126,20 @@ healthy_ports() {  # 输出当前真能响应 /api/status 的端口，逗号分�
 }
 
 set_upstream() {  # $1 = 逗号分隔的保持服务端口；留空 = 双后端都挂载
-  local keep="${1:-}" a b backup
+  local keep="${1:-}" a b p0 p1 backup
+  p0="${PORTS[0]}"
+  p1="${PORTS[1]}"
   # max_fails=0：AI 流式请求的长耗时不能被当成节点故障，
   # 否则发布期间摘掉一台后，剩下一台的读超时会把最后可用节点也顶掉。
-  if [ -z "$keep" ] || [[ ",$keep," == *",14010,"* ]]; then a="max_fails=0;"; else a="down;"; fi
-  if [ -z "$keep" ] || [[ ",$keep," == *",14011,"* ]]; then b="max_fails=0;"; else b="down;"; fi
+  if [ -z "$keep" ] || [[ ",$keep," == *",$p0,"* ]]; then a="max_fails=0;"; else a="down;"; fi
+  if [ -z "$keep" ] || [[ ",$keep," == *",$p1,"* ]]; then b="max_fails=0;"; else b="down;"; fi
 
   backup=$(mktemp)
-  cp "$UP" "$backup" 2>/dev/null || true
+  cp "$UP" "$backup"
   cat > "$UP" <<EOF
-upstream dramarouter_us {
-    server 127.0.0.1:14010 $a
-    server 127.0.0.1:14011 $b
+upstream $UPSTREAM {
+    server 127.0.0.1:$p0 $a
+    server 127.0.0.1:$p1 $b
     keepalive 512;
 }
 EOF
@@ -127,8 +201,8 @@ rollback() {
   echo "当前健康后端: ${alive:-无}" >&2
 
   if [ -n "$PREV_IMAGE" ]; then
-    docker tag "$PREV_IMAGE" dramarouter:latest
-    echo "dramarouter:latest 已指回更新前的镜像：$PREV_IMAGE" >&2
+    docker tag "$PREV_IMAGE" "$DEFAULT_IMG"
+    echo "$DEFAULT_IMG 已指回更新前的镜像：$PREV_IMAGE" >&2
   fi
 
   local i svc j port peer
@@ -164,11 +238,12 @@ rollback() {
 
 preflight
 
-if [ "$IMG" != "dramarouter:latest" ]; then
+if [ "$IMG" != "$DEFAULT_IMG" ]; then
   # 保留上一版用于回滚（PREV_IMAGE 已在启动时从运行中的容器读取），再打 latest 标签
-  if [ -n "$PREV_IMAGE" ]; then docker tag "$PREV_IMAGE" dramarouter:prev 2>/dev/null || true; fi
-  docker tag "$IMG" dramarouter:latest
-  echo "已把 $IMG 标记为 dramarouter:latest（回滚点 dramarouter:prev）"
+  prev_tag="${DEFAULT_IMG%:latest}:prev"
+  if [ -n "$PREV_IMAGE" ]; then docker tag "$PREV_IMAGE" "$prev_tag" 2>/dev/null || true; fi
+  docker tag "$IMG" "$DEFAULT_IMG"
+  echo "已把 $IMG 标记为 $DEFAULT_IMG（回滚点 $prev_tag）"
 fi
 
 trap rollback EXIT
@@ -179,4 +254,4 @@ roll_one 1
 
 set_upstream ""
 trap - EXIT ERR
-echo "=== 滚动更新完成，双后端已恢复 ==="
+echo "=== 滚动更新完成，$SITE 站双后端已恢复 ==="
