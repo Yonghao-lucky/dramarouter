@@ -236,11 +236,11 @@ type ResellerDashboardCustomerRow struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	Group       string `json:"group"`
-	Balance     int64  `json:"balance_quota"`
-	UsedQuota   int64  `json:"used_quota"`
-	Revenue     int64  `json:"revenue_quota"`
-	Requests    int64  `json:"request_count"`
-	LastActive  int64  `json:"last_active_at"`
+	Balance     int64  `json:"balance_quota" gorm:"column:balance"`
+	UsedQuota   int64  `json:"used_quota" gorm:"column:used_quota"`
+	Revenue     int64  `json:"revenue_quota" gorm:"column:revenue"`
+	Requests    int64  `json:"request_count" gorm:"column:requests"`
+	LastActive  int64  `json:"last_active_at" gorm:"column:last_active"`
 }
 
 // GetResellerCustomerRows returns every customer this reseller owns with its
@@ -275,12 +275,12 @@ func GetResellerCustomerRows(resellerUserId, windowDays int) ([]ResellerDashboar
 			u.username AS username,
 			u.display_name AS display_name,
 			u.` + commonGroupCol + ` AS ` + commonGroupCol + `,
-			u.quota AS balance_quota,
+			u.quota AS balance,
 			u.used_quota AS used_quota,
-			COALESCE(s.revenue,0) AS revenue_quota,
-			COALESCE(s.requests,0) AS request_count,
-			COALESCE(s.last_active,0) AS last_active_at`).
-		Order("revenue_quota desc, u.username asc").
+			COALESCE(s.revenue,0) AS revenue,
+			COALESCE(s.requests,0) AS requests,
+			COALESCE(s.last_active,0) AS last_active`).
+		Order("revenue desc, u.username asc").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
