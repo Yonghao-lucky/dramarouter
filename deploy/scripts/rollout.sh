@@ -55,8 +55,10 @@ healthy_ports() {  # 输出当前真能响应 /api/status 的端口，逗号分�
 
 set_upstream() {  # $1 = 逗号分隔的保持服务端口；留空 = 双后端都挂载
   local keep="${1:-}" a b backup
-  if [ -z "$keep" ] || [[ ",$keep," == *",14010,"* ]]; then a="max_fails=2 fail_timeout=10s;"; else a="down;"; fi
-  if [ -z "$keep" ] || [[ ",$keep," == *",14011,"* ]]; then b="max_fails=2 fail_timeout=10s;"; else b="down;"; fi
+  # max_fails=0：AI 流式请求的长耗时不能被当成节点故障，
+  # 否则发布期间摘掉一台后，剩下一台的读超时会把最后可用节点也顶掉。
+  if [ -z "$keep" ] || [[ ",$keep," == *",14010,"* ]]; then a="max_fails=0;"; else a="down;"; fi
+  if [ -z "$keep" ] || [[ ",$keep," == *",14011,"* ]]; then b="max_fails=0;"; else b="down;"; fi
 
   backup=$(mktemp)
   cp "$UP" "$backup" 2>/dev/null || true
@@ -64,7 +66,7 @@ set_upstream() {  # $1 = 逗号分隔的保持服务端口；留空 = 双后端�
 upstream dramarouter_us {
     server 127.0.0.1:14010 $a
     server 127.0.0.1:14011 $b
-    keepalive 64;
+    keepalive 512;
 }
 EOF
   if ! docker exec "$CTR" nginx -t >/dev/null 2>&1; then

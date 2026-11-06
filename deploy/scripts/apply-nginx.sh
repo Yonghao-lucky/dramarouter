@@ -10,9 +10,12 @@ SITES_ROOT=/opt/1panel/www/sites
 
 cat > "$UP" <<'CONF'
 upstream dramarouter_us {
-    server 127.0.0.1:14010 max_fails=2 fail_timeout=10s;
-    server 127.0.0.1:14011 max_fails=2 fail_timeout=10s;
-    keepalive 64;
+    # AI 流式请求单条可跑十几分钟，不能把"读超时"当成节点故障，
+    # 否则两节点互相顶掉、全部请求变成 502。
+    # max_fails=0 关闭失败计数，502 只来自连接层面的真实失败。
+    server 127.0.0.1:14010 max_fails=0;
+    server 127.0.0.1:14011 max_fails=0;
+    keepalive 512;
 }
 CONF
 
@@ -29,11 +32,14 @@ location ^~ / {
     proxy_read_timeout 1800s;
     send_timeout 1800s;
     client_max_body_size $body;
-    client_body_timeout 600s;
+    client_body_timeout 1200s;
     proxy_buffering off;
     proxy_request_buffering off;
     proxy_cache off;
-    proxy_next_upstream error timeout;
+    # 只对连接类错误换节点：上游把连接拒了/断了才算真实失败。
+    # 不要带 timeout，长流式请求超时换节点会导致同一请求被上游执行两次。
+    proxy_next_upstream error;
+    proxy_next_upstream_tries 2;
     add_header X-Accel-Buffering no always;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
@@ -45,8 +51,8 @@ location ^~ / {
 CONF
 }
 
-write_site realmdrama.com 140m
-write_site studio.realmdrama.com 500m
+write_site realmdrama.com 200m
+write_site studio.realmdrama.com 600m
 
 docker exec "$CTR" nginx -t 2>&1 | tail -2
 docker exec "$CTR" nginx -s reload
