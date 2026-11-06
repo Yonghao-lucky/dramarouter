@@ -199,6 +199,30 @@ export interface ResellerDashboardTopCustomer {
   balance_quota: number
 }
 
+/** One hour of a customer's model usage, matching the platform analytics rows. */
+export interface ResellerQuotaDataRow {
+  user_id?: number
+  username?: string
+  model_name?: string
+  created_at: number
+  token_used?: number
+  count?: number
+  quota?: number
+}
+
+/** One owned customer's standing figures in the dashboard window. */
+export interface ResellerDashboardCustomerRow {
+  user_id: number
+  username: string
+  display_name: string
+  group: string
+  balance_quota: number
+  used_quota: number
+  revenue_quota: number
+  request_count: number
+  last_active_at: number
+}
+
 export interface ResellerDashboardModelRow {
   model_name: string
   revenue_quota: number
@@ -218,6 +242,7 @@ export interface ResellerDashboard {
   window_days: number
   top_customers: ResellerDashboardTopCustomer[]
   by_model: ResellerDashboardModelRow[]
+  customers: ResellerDashboardCustomerRow[]
   by_day: ResellerMarginDay[]
 }
 

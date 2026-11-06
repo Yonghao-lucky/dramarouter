@@ -75,6 +75,7 @@ import {
   getResellerSettlements,
   getResellerTemplates,
   resellerSettlementExportURL,
+  resellerLogsExportURL,
   saveResellerTemplate,
   setResellerQuotaAlert,
   applyResellerTemplate,
@@ -187,7 +188,16 @@ function CustomerDetailDialog(props: {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [fundAmount, setFundAmount] = useState('')
+  // Prices are edited one customer at a time. A draft keyed by group alone would
+  // survive switching customers and be written to the next one, which looked
+  // like "changing one customer changes every customer".
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
+
+  // Reset every transient draft when the dialog switches to another customer.
+  useEffect(() => {
+    setPriceDrafts({})
+    setFundAmount('')
+  }, [props.customerId])
 
   const detail = useQuery({
     queryKey: ['reseller', 'customer', props.customerId],
@@ -225,8 +235,15 @@ function CustomerDetailDialog(props: {
         group,
         priceDrafts[group] ?? ''
       ),
-    onSuccess: () => {
+    onSuccess: (_data, group) => {
       toast.success(t('Price updated'))
+      // Drop the draft so the input shows the price the server just stored
+      // instead of the text that happened to be typed for it.
+      setPriceDrafts((prev) => {
+        const next = { ...prev }
+        delete next[group]
+        return next
+      })
       void refresh()
     },
   })
@@ -356,7 +373,11 @@ function CustomerDetailDialog(props: {
                                 className='w-24'
                                 inputMode='decimal'
                                 placeholder={group.ratio || '—'}
-                                value={priceDrafts[group.group] ?? ''}
+                                value={
+                                  priceDrafts[group.group] ??
+                                  group.ratio ??
+                                  ''
+                                }
                                 onChange={(event) =>
                                   setPriceDrafts((prev) => ({
                                     ...prev,
@@ -380,6 +401,8 @@ function CustomerDetailDialog(props: {
                                 variant='outline'
                                 disabled={
                                   !priceDrafts[group.group] ||
+                                  priceDrafts[group.group] ===
+                                    group.ratio ||
                                   (savePrice.isPending &&
                                     savePrice.variables === group.group)
                                 }
@@ -1040,11 +1063,13 @@ function UsagePanel() {
 function LogsPanel() {
   const { t } = useTranslation()
   const [customerId, setCustomerId] = useState('')
+  const [modelName, setModelName] = useState('')
   const logs = useQuery({
-    queryKey: ['reseller', 'logs', customerId],
+    queryKey: ['reseller', 'logs', customerId, modelName],
     queryFn: () =>
       getResellerLogs({
         customer_id: customerId ? Number(customerId) : undefined,
+        model_name: modelName || undefined,
         page_size: 50,
       }),
   })
@@ -1057,6 +1082,31 @@ function LogsPanel() {
         onRefresh={() => void logs.refetch()}
         refreshing={logs.isFetching}
       />
+      <div className='flex flex-wrap items-center gap-2'>
+        <Input
+          className='w-56'
+          placeholder={t('Search by model')}
+          value={modelName}
+          onChange={(event) => setModelName(event.target.value)}
+        />
+        <Button
+          size='sm'
+          variant='outline'
+          onClick={() => {
+            // Export honours the same customer and model filters so the file
+            // matches what is on screen.
+            window.open(
+              resellerLogsExportURL({
+                customer_id: customerId ? Number(customerId) : undefined,
+                model_name: modelName || undefined,
+              }),
+              '_blank'
+            )
+          }}
+        >
+          {t('Export CSV')}
+        </Button>
+      </div>
       <Table>
         <TableHeader>
           <TableRow>
@@ -1277,8 +1327,8 @@ function PriceBookPanel() {
       {sections.map((section) => (
         <Card key={section.vendor}>
           <CardHeader className='pb-2'>
-            <CardTitle className='flex items-center gap-2 text-sm'>
-              {section.icon ? getLobeIcon(section.icon, 18) : null}
+            <CardTitle className='flex items-center gap-2 text-base'>
+              {section.icon ? getLobeIcon(section.icon, 20) : null}
               {section.vendor}
               <span className='text-muted-foreground text-xs font-normal'>
                 {t('{{count}} groups', { count: section.rows.length })}
@@ -1300,28 +1350,58 @@ function PriceBookPanel() {
               }}
               className='flex flex-col gap-2'
             >
-            {section.rows.map((row) => (
+            {section.rows.map((row) => {
+              // The book is read at a glance to decide a price, so cost and
+              // standing price sit in labelled cells with real numbers instead
+              // of one muted sentence the reseller has to parse.
+              const cost = row.sellable ? row.cost_ratio : ''
+              const price = row.sellable
+                ? row.ratio || row.cost_ratio
+                : ''
+              const margin =
+                Number(cost) > 0 && Number(price) > 0
+                  ? `${(((Number(price) - Number(cost)) / Number(price)) * 100).toFixed(1)}%`
+                  : ''
+              return (
               <GroupOrderItem key={row.group} group={row.group}>
-              <div
-                className='flex flex-col gap-1 rounded-lg border p-3'
-              >
-                <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
-                  <span className='text-sm font-medium'>{row.group}</span>
-                  <span className='text-muted-foreground text-xs tabular-nums'>
-                    {t('My cost')} {row.sellable ? row.cost_ratio : t('No cost set')}
-                    {' · '}
-                    {t('Standing price')}{' '}
-                    {row.sellable ? row.ratio || row.cost_ratio : '—'}
-                  </span>
+                <div className='flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs'>
+                  <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
+                    <span className='text-base font-semibold tracking-tight'>
+                      {row.group}
+                    </span>
+                    {margin ? (
+                      <Badge variant='secondary' className='tabular-nums'>
+                        {t('Margin')} {margin}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  {row.description ? (
+                    <p className='text-muted-foreground text-xs leading-relaxed'>
+                      {row.description}
+                    </p>
+                  ) : null}
+                  <div className='flex flex-wrap gap-x-6 gap-y-1 border-t pt-2'>
+                    <div className='flex flex-col'>
+                      <span className='text-muted-foreground text-[11px] uppercase'>
+                        {t('My cost')}
+                      </span>
+                      <span className='text-sm font-medium tabular-nums'>
+                        {cost || t('No cost set')}
+                      </span>
+                    </div>
+                    <div className='flex flex-col'>
+                      <span className='text-muted-foreground text-[11px] uppercase'>
+                        {t('Standing price')}
+                      </span>
+                      <span className='text-sm font-semibold tabular-nums'>
+                        {price || '—'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                {row.description ? (
-                  <p className='text-muted-foreground text-xs'>
-                    {row.description}
-                  </p>
-                ) : null}
-              </div>
               </GroupOrderItem>
-            ))}
+              )
+            })}
             </Reorder.Group>
           </CardContent>
         </Card>
@@ -1579,6 +1659,56 @@ function DashboardPanel() {
                 ))}
                 {(data?.top_customers ?? []).length === 0 ? (
                   <EmptyRow colSpan={4} />
+                ) : null}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        <Card className='lg:col-span-2'>
+          <CardHeader className='pb-2'>
+            <CardTitle className='text-sm'>{t('Customer breakdown')}</CardTitle>
+          </CardHeader>
+          <CardContent className='overflow-x-auto'>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('Customer')}</TableHead>
+                  <TableHead>{t('Group')}</TableHead>
+                  <TableHead>{t('Consumption')}</TableHead>
+                  <TableHead>{t('Requests')}</TableHead>
+                  <TableHead>{t('Balance')}</TableHead>
+                  <TableHead>{t('Last active')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(data?.customers ?? []).map((row) => (
+                  <TableRow key={row.user_id}>
+                    <TableCell>
+                      {row.display_name || row.username}
+                      <span className='text-muted-foreground ml-1 text-xs'>
+                        #{row.user_id}
+                      </span>
+                    </TableCell>
+                    <TableCell className='text-xs'>{row.group}</TableCell>
+                    <TableCell className='tabular-nums'>
+                      {formatQuota(row.revenue_quota)}
+                    </TableCell>
+                    <TableCell className='tabular-nums'>
+                      {row.request_count}
+                    </TableCell>
+                    <TableCell className='tabular-nums'>
+                      {formatQuota(row.balance_quota)}
+                    </TableCell>
+                    <TableCell className='text-muted-foreground text-xs'>
+                      {row.last_active_at
+                        ? new Date(row.last_active_at * 1000).toLocaleString()
+                        : t('No activity')}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(data?.customers ?? []).length === 0 ? (
+                  <EmptyRow colSpan={6} />
                 ) : null}
               </TableBody>
             </Table>

@@ -31,6 +31,7 @@ import type {
   ResellerQuotaAlert,
   ResellerSettlement,
   ResellerPriceTemplate,
+  ResellerQuotaDataRow,
   ResellerSummary,
   ResellerTemplateBundle,
   ResellerTransfer,
@@ -67,6 +68,24 @@ function unwrapPage<T>(response: PageResponse<T>): {
     return { items: response.data, total: response.data.length }
   }
   return { items: response.data.items ?? [], total: response.data.total ?? 0 }
+}
+
+/**
+ * Model-call analytics across every customer this reseller owns. Uses the same
+ * row shape as `/api/data/self` so the dashboard charts need no translation.
+ */
+export async function getResellerQuotaDates(params: {
+  start_timestamp: number
+  end_timestamp: number
+}) {
+  return unwrap(
+    (
+      await api.get<Response<ResellerQuotaDataRow[]>>(
+        '/api/reseller/analytics',
+        { params }
+      )
+    ).data
+  )
 }
 
 export async function getResellerSummary() {
@@ -352,6 +371,24 @@ export async function getResellerSettlements(params: {
 
 export function resellerSettlementExportURL() {
   return '/api/reseller/settlements/export'
+}
+
+/** CSV of the caller's own customers' usage logs, same filters as the list. */
+export function resellerLogsExportURL(params: {
+  customer_id?: number
+  type?: number
+  model_name?: string
+  start_timestamp?: number
+  end_timestamp?: number
+}) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '' && value !== null) {
+      query.set(key, String(value))
+    }
+  }
+  const suffix = query.toString()
+  return `/api/reseller/logs/export${suffix ? `?${suffix}` : ''}`
 }
 
 export async function getResellerDashboard(days = 7) {

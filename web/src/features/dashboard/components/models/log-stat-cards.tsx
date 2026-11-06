@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { IconBadge } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getUserQuotaDates } from '@/features/dashboard/api'
+import { getResellerQuotaDates } from '@/features/reseller/api'
 import { useModelStatCardsConfig } from '@/features/dashboard/hooks/use-dashboard-config'
 import {
   buildQueryParams,
@@ -63,6 +64,9 @@ export function LogStatCards(props: LogStatCardsProps) {
   const statCardsConfig = useModelStatCardsConfig()
   const user = useAuthStore((state) => state.auth.user)
   const isAdmin = !!(user?.role && user.role >= 10)
+  // A reseller is a normal account, but its own analytics are empty: the traffic
+  // that matters is its customers'. Read the owner-scoped aggregate instead.
+  const isReseller = user?.reseller_enabled === true
   const [stats, setStats] = useState<{
     totalQuota: number
     totalCount: number
@@ -91,10 +95,17 @@ export function LogStatCards(props: LogStatCardsProps) {
     const timeDiff = (timeRange.end_timestamp - timeRange.start_timestamp) / 60
     setTimeRangeMinutes(timeDiff)
 
-    void getUserQuotaDates(buildQueryParams(timeRange, filters), isAdmin)
+    const query = isReseller
+      ? getResellerQuotaDates({
+          start_timestamp: timeRange.start_timestamp,
+          end_timestamp: timeRange.end_timestamp,
+        }).then((rows) => ({ data: rows }))
+      : getUserQuotaDates(buildQueryParams(timeRange, filters), isAdmin)
+
+    void query
       .then((res) => {
         if (abortController.signal.aborted) return
-        const data = res?.data || []
+        const data = (res as { data?: QuotaDataItem[] })?.data || []
         setStats(calculateDashboardStats(data))
         onDataUpdate?.(data, false)
       })
@@ -113,7 +124,7 @@ export function LogStatCards(props: LogStatCardsProps) {
     return () => {
       abortController.abort()
     }
-  }, [filters, isAdmin, onDataUpdate])
+  }, [filters, isAdmin, isReseller, onDataUpdate])
 
   const adaptedStats = {
     rpm: stats?.totalCount ?? 0,

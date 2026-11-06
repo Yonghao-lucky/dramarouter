@@ -428,3 +428,72 @@ func recordResellerAudit(c *gin.Context, actorId int, action string, params map[
 	model.RecordOperationAuditLog(actorId, auditContentEN(action, params), c.ClientIP(), action, params, nil, nil)
 	markAuditLogged(c)
 }
+
+// ResellerCustomerLogsExport streams the caller's own customers' usage logs as
+// CSV. It reuses the paged reader so masking and ownership stay identical to the
+// on-screen list; only the row limit differs.
+func ResellerCustomerLogsExport(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	modelName := c.Query("model_name")
+	customerId, _ := strconv.Atoi(c.DefaultQuery("customer_id", "0"))
+	const maxExportRows = 5000
+	logs, _, err := model.ResellerCustomerLogs(profile.UserId, customerId, logType, startTimestamp, endTimestamp, modelName, 0, maxExportRows)
+	if err != nil {
+		writeResellerError(c, err)
+		return
+	}
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="reseller-logs.csv"`)
+	// A BOM keeps Excel from mangling UTF-8 model and content text.
+	_, _ = c.Writer.Write([]byte("\xEF\xBB\xBF"))
+	writer := csv.NewWriter(c.Writer)
+	defer writer.Flush()
+	_ = writer.Write([]string{
+		"id", "created_at", "user_id", "username", "model_name", "group",
+		"quota", "prompt_tokens", "completion_tokens", "use_time", "is_stream", "content",
+	})
+	for _, row := range logs {
+		_ = writer.Write([]string{
+			strconv.Itoa(row.Id),
+			strconv.FormatInt(row.CreatedAt, 10),
+			strconv.Itoa(row.UserId),
+			row.Username,
+			row.ModelName,
+			row.Group,
+			strconv.Itoa(row.Quota),
+			strconv.Itoa(row.PromptTokens),
+			strconv.Itoa(row.CompletionTokens),
+			strconv.Itoa(row.UseTime),
+			strconv.FormatBool(row.IsStream),
+			row.Content,
+		})
+	}
+}
+
+// ResellerAnalytics returns the model-call analytics of the customers this
+// reseller owns. The window is clamped to one month, matching the ordinary
+// self view, so a single request cannot scan the whole history.
+func ResellerAnalytics(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	if endTimestamp-startTimestamp > 2592000 {
+		common.ApiErrorMsg(c, "time range cannot exceed 1 month")
+		return
+	}
+	dates, err := model.GetResellerQuotaData(profile.UserId, startTimestamp, endTimestamp)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": dates})
+}

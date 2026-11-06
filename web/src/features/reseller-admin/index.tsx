@@ -25,6 +25,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -282,19 +283,21 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
                   <GroupOrderItem key={row.group} group={row.group}>
                     <div className='flex flex-col gap-2 rounded-lg border p-3'>
                   <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
-                    <span className='text-sm font-medium'>{row.group}</span>
-                    <span className='text-muted-foreground text-xs tabular-nums'>
-                      {t('Platform ratio')} {platformByGroup[row.group] ?? '-'}
+                    <span className='text-base font-semibold tracking-tight'>
+                      {row.group}
                     </span>
+                    <Badge variant='outline' className='tabular-nums'>
+                      {t('Platform ratio')} {platformByGroup[row.group] ?? '-'}
+                    </Badge>
                   </div>
                   {row.description ? (
-                    <p className='text-muted-foreground text-xs'>
+                    <p className='text-muted-foreground text-xs leading-relaxed'>
                       {row.description}
                     </p>
                   ) : null}
                   <div className='grid gap-2 sm:grid-cols-2'>
                     <div className='flex flex-col gap-1'>
-                      <span className='text-muted-foreground text-xs'>
+                      <span className='text-foreground/70 text-xs font-medium'>
                         {t('Wholesale')}{' '}
                         {costByGroup.get(row.group)
                           ? `(${costByGroup.get(row.group)})`
@@ -322,7 +325,7 @@ function ProfileBook({ resellerId }: { resellerId: number }) {
                       </div>
                     </div>
                     <div className='flex flex-col gap-1'>
-                      <span className='text-muted-foreground text-xs'>
+                      <span className='text-foreground/70 text-xs font-medium'>
                         {t('Retail')}{' '}
                         {retailByGroup.get(row.group)
                           ? `(${retailByGroup.get(row.group)})`

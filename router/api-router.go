@@ -288,6 +288,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.GET("/transfers", controller.ResellerTransfers)
 			resellerRoute.GET("/usage", controller.ResellerUsage)
 			resellerRoute.GET("/logs", controller.ResellerCustomerLogs)
+			resellerRoute.GET("/logs/export", controller.ResellerCustomerLogsExport)
 			resellerRoute.GET("/tasks", controller.ResellerCustomerTasks)
 			resellerRoute.GET("/margins", controller.ResellerMargins)
 			resellerRoute.POST("/margins/claim", controller.ResellerClaimMargin)
@@ -301,6 +302,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.GET("/settlements/export", controller.ResellerSettlementExport)
 			// Customer analytics, scoped to customers this reseller owns.
 			resellerRoute.GET("/dashboard", controller.ResellerDashboard)
+			resellerRoute.GET("/analytics", controller.ResellerAnalytics)
 			resellerRoute.GET("/audit", controller.ResellerAuditTrail)
 			// Reusable per-group price templates and low-balance mail alerts.
 			resellerRoute.GET("/templates", controller.ResellerPriceTemplates)
