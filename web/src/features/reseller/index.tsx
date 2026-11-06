@@ -52,6 +52,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   formatQuota,
+  formatUseTime,
   parseQuotaFromDollars,
   quotaUnitsToEditableAmount,
 } from '@/lib/format'
@@ -92,11 +93,13 @@ import {
   setResellerCustomerPrice,
   setResellerCustomerStatus,
   transferResellerQuota,
+  voidResellerTransfer,
 } from './api'
 import type {
   ResellerCustomer,
   ResellerCustomerDetail,
   ResellerCustomerGroup,
+  ResellerTransfer,
 } from './types'
 
 function StatCard(props: { title: string; value: string; hint?: string }) {
@@ -430,7 +433,7 @@ function FundingReceiptPanel(props: { customerId: number }) {
   )
 }
 
-function CustomerDetailDialog(props: {
+function CustomerDetailPanel(props: {
   customerId: number | null
   onClose: () => void
 }) {
@@ -488,6 +491,17 @@ function CustomerDetailDialog(props: {
     },
   })
 
+  // Voiding appends a compensating reclaim server-side; the original row stays
+  // on the ledger, so the list refreshes rather than dropping an entry.
+  const voidTransfer = useMutation({
+    mutationFn: (transferId: number) => voidResellerTransfer(transferId),
+    onSuccess: () => {
+      toast.success(t('Transfer voided'))
+      void refresh()
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+
   const savePrice = useMutation({
     mutationFn: (group: string) =>
       setResellerCustomerPrice(
@@ -510,22 +524,32 @@ function CustomerDetailDialog(props: {
 
   const data: ResellerCustomerDetail | undefined = detail.data
 
-  return (
-    <Dialog
-      open={props.customerId != null}
-      onOpenChange={() => props.onClose()}
-    >
-      <DialogContent className='h-[92vh] max-h-[92vh] w-[96vw] max-w-[1200px] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden sm:max-w-[1200px]'>
-        <DialogHeader>
-          <DialogTitle>
-            {data
-              ? `${data.username} · #${data.user_id}`
-              : t('Customer detail')}
-          </DialogTitle>
-        </DialogHeader>
+  // A funding already reversed by a compensating reclaim must not offer a
+  // second void, otherwise the same row could be reclaimed twice.
+  const voidedIds = new Set(
+    (data?.recent_transfers ?? [])
+      .map((item) => item.reverses_id)
+      .filter((id): id is number => !!id)
+  )
 
+  if (props.customerId == null) return null
+
+  return (
+    <div className='flex flex-col gap-3'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <span className='text-sm font-medium'>
+          {data
+            ? `${t('Managing')}: ${data.username} · #${data.user_id}`
+            : t('Customer detail')}
+        </span>
+        <Button size='sm' variant='ghost' onClick={props.onClose}>
+          {t('Close')}
+        </Button>
+      </div>
+
+      <div className='flex flex-col gap-4'>
         {data ? (
-          <div className='flex min-h-0 flex-col gap-4 overflow-y-auto pr-1'>
+          <div className='flex min-h-0 flex-col gap-4'>
             <div className='grid gap-3 sm:grid-cols-4'>
               <StatCard
                 title={t('Wallet')}
@@ -742,10 +766,18 @@ function CustomerDetailDialog(props: {
                         <TableHead>{t('Retail')}</TableHead>
                         <TableHead>{t('Cost')}</TableHead>
                         <TableHead>{t('Group')}</TableHead>
+                        <TableHead>{t('Kind')}</TableHead>
+                        <TableHead />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(data.recent_transfers ?? []).map((row) => (
+                      {(data.recent_transfers ?? []).map((row) => {
+                        const isVoided = voidedIds.has(row.id)
+                        const canVoid =
+                          row.direction === 'fund' &&
+                          !isVoided &&
+                          !row.reverses_id
+                        return (
                         <TableRow key={row.id}>
                           <TableCell>
                             {new Date(row.created_at * 1000).toLocaleString()}
@@ -770,10 +802,31 @@ function CustomerDetailDialog(props: {
                             {formatQuota(row.cost_quota)}
                           </TableCell>
                           <TableCell>{row.group}</TableCell>
+                          <TableCell>
+                            <TransferKindLabel row={row} />{' '}
+                            {isVoided ? (
+                              <Badge variant='outline' className='ml-1'>
+                                {t('Voided')}
+                              </Badge>
+                            ) : null}
+                          </TableCell>
+                          <TableCell>
+                            {canVoid ? (
+                              <Button
+                                size='sm'
+                                variant='ghost'
+                                disabled={voidTransfer.isPending}
+                                onClick={() => voidTransfer.mutate(row.id)}
+                              >
+                                {t('Void')}
+                              </Button>
+                            ) : null}
+                          </TableCell>
                         </TableRow>
-                      ))}
+                        )
+                      })}
                       {(data.recent_transfers ?? []).length === 0 ? (
-                        <EmptyRow colSpan={5} />
+                        <EmptyRow colSpan={7} />
                       ) : null}
                     </TableBody>
                   </Table>
@@ -784,9 +837,21 @@ function CustomerDetailDialog(props: {
             <FundingReceiptPanel customerId={props.customerId as number} />
           </div>
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   )
+}
+
+/** What a transfer row is: a compensation, a precredit, or a plain recharge. */
+function TransferKindLabel(props: { row: ResellerTransfer }) {
+  const { t } = useTranslation()
+  if (props.row.reverses_id) {
+    return <>{t('Void of #{{id}}', { id: props.row.reverses_id })}</>
+  }
+  if (props.row.kind === 'precredit') {
+    return <>{t('Precredit')}</>
+  }
+  return <>{t('Recharge')}</>
 }
 
 function CustomersPanel() {
@@ -1123,7 +1188,7 @@ function CustomersPanel() {
       </Table>
       </div>
 
-      <CustomerDetailDialog
+      <CustomerDetailPanel
         customerId={openCustomer}
         onClose={() => setOpenCustomer(null)}
       />
@@ -1849,6 +1914,13 @@ function DashboardPanel() {
           value={formatQuota(data?.revenue_quota ?? 0)}
         />
         <StatCard
+          title={t('Active customers')}
+          value={String(data?.active_count ?? 0)}
+          hint={t('{{count}} new in this window', {
+            count: data?.new_customer_count ?? 0,
+          })}
+        />
+        <StatCard
           title={t('Requests')}
           value={String(data?.request_count ?? 0)}
           hint={t('Avg {{value}} per request', {
@@ -1858,6 +1930,36 @@ function DashboardPanel() {
         <StatCard
           title={t('Their wallet total')}
           value={formatQuota(data?.total_balance_quota ?? 0)}
+        />
+      </div>
+
+      <div className='grid gap-3 sm:grid-cols-3'>
+        <StatCard
+          title={t('Success rate')}
+          value={
+            data?.health?.request_count
+              ? `${(data.health.success_rate ?? 0).toFixed(2)}%`
+              : '—'
+          }
+          hint={t('{{count}} failed', {
+            count: data?.health?.failed_count ?? 0,
+          })}
+        />
+        <StatCard
+          title={t('Average latency')}
+          value={
+            data?.health?.avg_latency_ms
+              ? formatUseTime((data.health.avg_latency_ms ?? 0) / 1000)
+              : '—'
+          }
+        />
+        <StatCard
+          title={t('Throughput')}
+          value={
+            data?.health?.avg_tps
+              ? `${(data.health.avg_tps ?? 0).toFixed(1)} t/s`
+              : '—'
+          }
         />
       </div>
 
@@ -1965,6 +2067,7 @@ function DashboardPanel() {
                   <TableHead>{t('Model')}</TableHead>
                   <TableHead>{t('Consumption')}</TableHead>
                   <TableHead>{t('Requests')}</TableHead>
+                  <TableHead>{t('Success rate')}</TableHead>
                   <TableHead>{t('Customers')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1979,12 +2082,17 @@ function DashboardPanel() {
                       {row.request_count}
                     </TableCell>
                     <TableCell className='tabular-nums'>
+                      {row.success_rate > 0
+                        ? `${row.success_rate.toFixed(2)}%`
+                        : '—'}
+                    </TableCell>
+                    <TableCell className='tabular-nums'>
                       {row.customer_count}
                     </TableCell>
                   </TableRow>
                 ))}
                 {(data?.by_model ?? []).length === 0 ? (
-                  <EmptyRow colSpan={4} />
+                  <EmptyRow colSpan={5} />
                 ) : null}
               </TableBody>
             </Table>

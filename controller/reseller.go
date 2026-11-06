@@ -634,6 +634,36 @@ func ResellerTransfers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
 }
 
+// ResellerVoidTransfer reverses one of the caller's own funding entries by
+// appending the matching reclaim. The original row is never edited, so a wrong
+// amount stays auditable alongside its correction.
+func ResellerVoidTransfer(c *gin.Context) {
+	profile, ok := requireReseller(c)
+	if !ok {
+		return
+	}
+	transferId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || transferId <= 0 {
+		common.ApiErrorMsg(c, "invalid transfer id")
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = common.DecodeJson(c.Request.Body, &req)
+	reversal, err := model.VoidResellerTransfer(profile.UserId, transferId, profile.UserId, req.Reason)
+	if err != nil {
+		writeResellerError(c, err)
+		return
+	}
+	recordResellerAudit(c, profile.UserId, "reseller.transfer.void", map[string]interface{}{
+		"transfer_id": transferId,
+		"reversal_id": reversal.Id,
+		"quota":       reversal.RetailQuota,
+	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": reversal})
+}
+
 type resellerGroupOrderRequest struct {
 	ResellerId int      `json:"reseller_id"`
 	Groups     []string `json:"groups"`

@@ -8941,6 +8941,11 @@
     "Select precredit #{{id}}": "选择预授信 #{{id}}",
     "{{count}} precredits awaiting a receipt": "{{count}} 笔预授信待核对",
     "Precredit hands the customer quota before you are paid. Reconcile the batch in the Precredit reconciliation section once the payment arrives.": "预授信是先把额度给到客户、款项后到。收到款后在「预授信核对」里把这批合并核对。",
-    "Select the precredits one payment covered, then record how it arrived. Merging several into one receipt keeps your statement matching one transfer.": "勾选同一笔到账覆盖的预授信，再填写到账方式和流水号。多笔合并成一条核对记录，方便与银行流水一一对应。"
+    "Select the precredits one payment covered, then record how it arrived. Merging several into one receipt keeps your statement matching one transfer.": "勾选同一笔到账覆盖的预授信，再填写到账方式和流水号。多笔合并成一条核对记录，方便与银行流水一一对应。",
+    "Void of #{{id}}": "冲正 #{{id}}",
+    "Transfer voided": "划拨已作废",
+    "Active customers": "活跃客户",
+    "{{count}} new in this window": "本周期新增 {{count}} 个",
+    "{{count}} failed": "{{count}} 次失败"
   }
 }

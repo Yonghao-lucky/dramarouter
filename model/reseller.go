@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -49,6 +50,10 @@ var (
 	ErrResellerWalletShort      = errors.New("reseller wallet is insufficient")
 	ErrResellerCustomerShort    = errors.New("customer wallet is insufficient")
 	ErrResellerTransferInvalid  = errors.New("invalid reseller transfer")
+	// A precredit already matched to a received payment must be un-matched
+	// before it can be voided, otherwise the statement keeps pointing at quota
+	// that was taken back.
+	ErrResellerTransferReconciled = errors.New("transfer is already reconciled")
 )
 
 // ResellerProfile binds a reseller capability to an existing platform user.
@@ -144,9 +149,13 @@ type ResellerTransfer struct {
 	OperatorId     int    `json:"operator_id"`
 	// Kind classifies funding as a paid recharge or a precredit awaiting
 	// settlement. Reclaims carry the kind of the funding they reverse.
-	Kind      string `json:"kind" gorm:"type:varchar(16);index"`
-	Remark    string `json:"remark" gorm:"type:varchar(255)"`
-	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_reseller_transfer_time,priority:1"`
+	Kind string `json:"kind" gorm:"type:varchar(16);index"`
+	// ReversesId points at the transfer this row undoes. A void is not an
+	// in-place edit — transfers are append-only evidence — so undoing a wrong
+	// amount appends a compensating reclaim carrying the original id here.
+	ReversesId int64  `json:"reverses_id" gorm:"bigint;index"`
+	Remark     string `json:"remark" gorm:"type:varchar(255)"`
+	CreatedAt  int64  `json:"created_at" gorm:"bigint;index:idx_reseller_transfer_time,priority:1"`
 }
 
 func (*ResellerTransfer) BeforeUpdate(*gorm.DB) error { return ErrBillingEvidenceImmutable }
@@ -284,6 +293,20 @@ func resellerRemainingTransfer(tx *gorm.DB, resellerUserId, customerUserId int) 
 	return row.Retail, nil
 }
 
+// ResellerTransferRequest is the full description of one wallet movement.
+type ResellerTransferRequest struct {
+	ResellerId     int
+	CustomerUserId int
+	OperatorId     int
+	Direction      string
+	RetailQuota    int64
+	EventKey       string
+	Kind           string
+	Remark         string
+	// ReversesId is set only on the compensating reclaim a void appends.
+	ReversesId int64
+}
+
 // TransferResellerQuota moves quota between the reseller wallet and one owned
 // customer wallet atomically. direction is "fund" or "reclaim". The event key is
 // caller-owned so a retried request never moves money twice.
@@ -296,15 +319,36 @@ func resellerRemainingTransfer(tx *gorm.DB, resellerUserId, customerUserId int) 
 // its own wholesale cost for the group actually used, which the billing path
 // records per request and the margin rollup credits back to the reseller wallet.
 func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direction string, retailQuota int64, eventKey, kind, remark string) (*ResellerTransfer, error) {
+	return transferResellerQuotaTx(DB, ResellerTransferRequest{
+		ResellerId:     resellerUserId,
+		CustomerUserId: customerUserId,
+		OperatorId:     operatorId,
+		Direction:      direction,
+		RetailQuota:    retailQuota,
+		EventKey:       eventKey,
+		Kind:           kind,
+		Remark:         remark,
+	})
+}
+
+func transferResellerQuotaTx(database *gorm.DB, req ResellerTransferRequest) (*ResellerTransfer, error) {
+	resellerUserId := req.ResellerId
+	customerUserId := req.CustomerUserId
+	operatorId := req.OperatorId
+	direction := req.Direction
+	retailQuota := req.RetailQuota
+	eventKey := req.EventKey
+	remark := req.Remark
+
 	if resellerUserId <= 0 || customerUserId <= 0 || retailQuota <= 0 || eventKey == "" {
 		return nil, ErrResellerTransferInvalid
 	}
 	if retailQuota > int64(common.MaxQuota) {
 		return nil, ErrResellerTransferInvalid
 	}
-	fundingKind := NormalizeResellerFundingKind(kind)
+	fundingKind := NormalizeResellerFundingKind(req.Kind)
 	transfer := &ResellerTransfer{}
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := database.Transaction(func(tx *gorm.DB) error {
 		var existing ResellerTransfer
 		err := tx.Where("event_key = ?", eventKey).First(&existing).Error
 		if err == nil {
@@ -412,6 +456,7 @@ func TransferResellerQuota(resellerUserId, customerUserId, operatorId int, direc
 			CostRatio:      "1",
 			OperatorId:     operatorId,
 			Kind:           fundingKind,
+			ReversesId:     req.ReversesId,
 			Remark:         remark,
 			CreatedAt:      common.GetTimestamp(),
 		}
@@ -437,4 +482,63 @@ func ResellerReclaimableQuota(resellerUserId, customerUserId int) (int64, error)
 		return 0, nil
 	}
 	return retail, nil
+}
+
+// VoidResellerTransfer undoes one funding by appending the matching reclaim.
+//
+// Transfers are append-only evidence, so a void never edits the original row:
+// it writes a reclaim of the same amount whose ReversesId points back at it.
+// That keeps both the mistake and its correction on the ledger, and makes the
+// funded/remaining aggregates correct without a special case.
+func VoidResellerTransfer(resellerUserId, transferId, operatorId int, reason string) (*ResellerTransfer, error) {
+	if resellerUserId <= 0 || transferId <= 0 {
+		return nil, ErrResellerTransferInvalid
+	}
+	var original ResellerTransfer
+	if err := DB.Where("id = ? AND reseller_id = ?", transferId, resellerUserId).First(&original).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrResellerTransferInvalid
+		}
+		return nil, err
+	}
+	if original.Direction != ResellerTransferFund {
+		// A reclaim is already a correction; voiding one would mean re-funding,
+		// which is a new funding the operator should record explicitly.
+		return nil, ErrResellerTransferInvalid
+	}
+
+	// A precredit covered by any live receipt is already part of a reconciliation
+	// batch; voiding it behind that batch's back would leave the receipt's total
+	// pointing at quota that no longer exists. Void the receipt first.
+	var covered int64
+	if err := DB.Model(&ResellerFundingReceiptItem{}).
+		Joins("JOIN reseller_funding_receipts ON reseller_funding_receipts.id = reseller_funding_receipt_items.receipt_id").
+		Where("reseller_funding_receipt_items.transfer_id = ? AND reseller_funding_receipts.status <> ?",
+			original.Id, ResellerReceiptVoid).
+		Count(&covered).Error; err != nil {
+		return nil, err
+	}
+	if covered > 0 {
+		return nil, ErrResellerTransferReconciled
+	}
+
+	remark := strings.TrimSpace(reason)
+	if remark == "" {
+		remark = "void #" + strconv.FormatInt(original.Id, 10)
+	}
+	return transferResellerQuotaTx(DB, ResellerTransferRequest{
+		ResellerId:     resellerUserId,
+		CustomerUserId: original.CustomerUserId,
+		OperatorId:     operatorId,
+		Direction:      ResellerTransferReclaim,
+		RetailQuota:    original.RetailQuota,
+		// Derived from the original id, so a double click replays instead of
+		// reversing the same funding twice.
+		EventKey: "void:" + strconv.FormatInt(original.Id, 10),
+		Kind:     original.Kind,
+		Remark:   remark,
+		// Links the correction to the mistake it undoes; without this the row
+		// reads as an unexplained reclaim and the original stays voidable.
+		ReversesId: original.Id,
+	})
 }

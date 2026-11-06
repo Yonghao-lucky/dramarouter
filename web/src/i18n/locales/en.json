@@ -8879,7 +8879,12 @@
     "Select precredit #{{id}}": "Select precredit #{{id}}",
     "{{count}} precredits awaiting a receipt": "{{count}} precredits awaiting a receipt",
     "Precredit hands the customer quota before you are paid. Reconcile the batch in the Precredit reconciliation section once the payment arrives.": "Precredit hands the customer quota before you are paid. Reconcile the batch in the Precredit reconciliation section once the payment arrives.",
-    "Select the precredits one payment covered, then record how it arrived. Merging several into one receipt keeps your statement matching one transfer.": "Select the precredits one payment covered, then record how it arrived. Merging several into one receipt keeps your statement matching one transfer."
+    "Select the precredits one payment covered, then record how it arrived. Merging several into one receipt keeps your statement matching one transfer.": "Select the precredits one payment covered, then record how it arrived. Merging several into one receipt keeps your statement matching one transfer.",
+    "Void of #{{id}}": "Void of #{{id}}",
+    "Transfer voided": "Transfer voided",
+    "Active customers": "Active customers",
+    "{{count}} new in this window": "{{count}} new in this window",
+    "{{count}} failed": "{{count}} failed"
   },
   "Starting at": "Starting at",
   "per image": "per image"

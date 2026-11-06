@@ -291,6 +291,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.POST("/funding-receipts/:id/confirm", controller.ResellerConfirmFundingReceipt)
 			resellerRoute.POST("/funding-receipts/:id/void", controller.ResellerVoidFundingReceipt)
 			resellerRoute.GET("/transfers", controller.ResellerTransfers)
+			resellerRoute.POST("/transfers/:id/void", controller.ResellerVoidTransfer)
 			resellerRoute.GET("/usage", controller.ResellerUsage)
 			resellerRoute.GET("/logs", controller.ResellerCustomerLogs)
 			resellerRoute.GET("/logs/export", controller.ResellerCustomerLogsExport)

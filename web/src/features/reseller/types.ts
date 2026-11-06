@@ -60,6 +60,8 @@ export interface ResellerTransfer {
   operator_id: number
   /** `recharge` (already paid) or `precredit` (on credit, settled later). */
   kind?: 'recharge' | 'precredit'
+  /** Set on the compensating reclaim that voids another transfer. */
+  reverses_id?: number
   remark: string
   created_at: number
 }
@@ -250,12 +252,23 @@ export interface ResellerDashboardModelRow {
   revenue_quota: number
   request_count: number
   customer_count: number
+  /** Percent 0..100, from the owned customers' logs; 0 when unknown. */
+  success_rate: number
 }
 
 /** Owned-customer analytics. Every figure is scoped to the caller. */
+export interface ResellerDashboardHealth {
+  request_count: number
+  failed_count: number
+  success_rate: number
+  avg_latency_ms: number
+  avg_tps: number
+}
+
 export interface ResellerDashboard {
   customer_count: number
   active_count: number
+  new_customer_count: number
   total_balance_quota: number
   revenue_quota: number
   request_count: number
@@ -266,6 +279,7 @@ export interface ResellerDashboard {
   by_model: ResellerDashboardModelRow[]
   customers: ResellerDashboardCustomerRow[]
   by_day: ResellerMarginDay[]
+  health: ResellerDashboardHealth
 }
 
 export interface ResellerAuditRow {

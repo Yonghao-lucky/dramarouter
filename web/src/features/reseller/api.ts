@@ -313,6 +313,18 @@ export async function getResellerTransfers(params: {
   )
 }
 
+/** Reverses one funding by appending the matching reclaim. */
+export async function voidResellerTransfer(transferId: number, reason?: string) {
+  return unwrap(
+    (
+      await api.post<Response<ResellerTransfer>>(
+        `/api/reseller/transfers/${transferId}/void`,
+        { reason }
+      )
+    ).data
+  )
+}
+
 export async function getResellerUsage(params: {
   customer_id?: number
   before_id?: number

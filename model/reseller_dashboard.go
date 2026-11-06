@@ -16,6 +16,7 @@ import (
 type ResellerCustomerDashboard struct {
 	CustomerCount     int64                          `json:"customer_count"`
 	ActiveCount       int64                          `json:"active_count"`
+	NewCustomerCount  int64                          `json:"new_customer_count"`
 	TotalBalance      int64                          `json:"total_balance_quota"`
 	RevenueQuota      int64                          `json:"revenue_quota"`
 	RequestCount      int64                          `json:"request_count"`
@@ -26,6 +27,20 @@ type ResellerCustomerDashboard struct {
 	ByModel           []ResellerDashboardModelRow    `json:"by_model"`
 	ByDay             []ResellerMarginDay            `json:"by_day"`
 	Customers         []ResellerDashboardCustomerRow `json:"customers"`
+	// Health is the owned customers' service quality in the same window.
+	Health ResellerDashboardHealth `json:"health"`
+}
+
+// ResellerDashboardHealth is the owned customers' aggregate service quality.
+// Success rate counts error logs against consume logs; latency and throughput
+// come from the consume rows themselves, so a reseller sees how its own
+// customers are actually being served rather than the platform-wide average.
+type ResellerDashboardHealth struct {
+	Requests     int64   `json:"request_count"`
+	FailedCount  int64   `json:"failed_count"`
+	SuccessRate  float64 `json:"success_rate"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	AvgTps       float64 `json:"avg_tps"`
 }
 
 type ResellerDashboardTopCustomer struct {
@@ -42,6 +57,9 @@ type ResellerDashboardModelRow struct {
 	Revenue   int64  `json:"revenue_quota"`
 	Requests  int64  `json:"request_count"`
 	Customers int64  `json:"customer_count"`
+	// SuccessRate is derived from the owned customers' logs for this model, so
+	// an operator can see which upstream is failing without leaving the page.
+	SuccessRate float64 `json:"success_rate"`
 }
 
 // GetResellerCustomerDashboard aggregates the owned customers over a rolling
@@ -74,6 +92,16 @@ func GetResellerCustomerDashboard(resellerUserId, windowDays int) (*ResellerCust
 	}
 	dashboard.CustomerCount = wallet.Count
 	dashboard.TotalBalance = wallet.Balance
+
+	// New customers are counted from the binding's effective date, so the figure
+	// means "joined this reseller in the window" rather than "first called".
+	var newCustomers int64
+	if err := DB.Model(&ResellerCustomerBinding{}).
+		Where("reseller_id = ? AND effective_from >= ?", resellerUserId, since).
+		Count(&newCustomers).Error; err != nil {
+		return nil, err
+	}
+	dashboard.NewCustomerCount = newCustomers
 
 	// Usage figures are scoped by owner_id, which is the reseller user id on
 	// every snapshot written for its customers.
@@ -133,6 +161,18 @@ func GetResellerCustomerDashboard(resellerUserId, windowDays int) (*ResellerCust
 	}
 	dashboard.ByModel = byModel
 
+	// Per-model success rate comes from the log table, which is the only place
+	// that records failures; the accounting snapshot only has billed requests.
+	if rates, err := getResellerModelSuccessRates(resellerUserId, since); err != nil {
+		common.SysError("failed to aggregate reseller model success rates: " + err.Error())
+	} else {
+		for i := range dashboard.ByModel {
+			if rate, ok := rates[dashboard.ByModel[i].ModelName]; ok {
+				dashboard.ByModel[i].SuccessRate = rate
+			}
+		}
+	}
+
 	byDay := make([]ResellerMarginDay, 0, windowDays)
 	// Day bucketing differs between PostgreSQL and SQLite, so the grouping key is
 	// produced by dividing the timestamp by one day in the server's local zone.
@@ -156,7 +196,107 @@ func GetResellerCustomerDashboard(resellerUserId, windowDays int) (*ResellerCust
 	}
 	dashboard.Customers = customers
 
+	health, err := getResellerDashboardHealth(resellerUserId, since)
+	if err != nil {
+		// Health is a quality indicator, not an accounting figure. A failure here
+		// (an empty log table on a fresh install, for example) must not blank the
+		// whole dashboard.
+		common.SysError("failed to aggregate reseller dashboard health: " + err.Error())
+	}
+	dashboard.Health = health
+
 	return dashboard, nil
+}
+
+// getResellerModelSuccessRates returns model name -> success rate percent,
+// computed from the same log rows that power the overall health figure so the
+// two can never disagree.
+func getResellerModelSuccessRates(resellerUserId int, since int64) (map[string]float64, error) {
+	rates := make(map[string]float64, 20)
+	customerIDs, err := ListResellerCustomerIDs(resellerUserId)
+	if err != nil {
+		return rates, err
+	}
+	if len(customerIDs) == 0 {
+		return rates, nil
+	}
+	rows := make([]struct {
+		ModelName string  `gorm:"column:model_name"`
+		Consumed  int64   `gorm:"column:consumed"`
+		Failed    int64   `gorm:"column:failed"`
+	}, 0, 20)
+	err = LOG_DB.Model(&Log{}).
+		Where("user_id IN ? AND created_at >= ? AND type IN ?",
+			customerIDs, since, []int{LogTypeConsume, LogTypeError}).
+		Select(`model_name,
+			COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END),0) AS consumed,
+			COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END),0) AS failed`,
+			LogTypeConsume, LogTypeError).
+		Group("model_name").
+		Scan(&rows).Error
+	if err != nil {
+		return rates, err
+	}
+	for _, row := range rows {
+		total := row.Consumed + row.Failed
+		if total > 0 {
+			rates[row.ModelName] = float64(row.Consumed) / float64(total) * 100
+		}
+	}
+	return rates, nil
+}
+
+// getResellerDashboardHealth aggregates the owned customers' request outcomes.
+// It reads the log table rather than the latency metrics table because only the
+// logs carry the customer id, which is what scopes the figures to this
+// reseller's book.
+func getResellerDashboardHealth(resellerUserId int, since int64) (ResellerDashboardHealth, error) {
+	health := ResellerDashboardHealth{}
+	customerIDs, err := ListResellerCustomerIDs(resellerUserId)
+	if err != nil {
+		return health, err
+	}
+	if len(customerIDs) == 0 {
+		return health, nil
+	}
+	var counts struct {
+		Consumed    int64 `gorm:"column:consumed"`
+		Failed      int64 `gorm:"column:failed"`
+		LatencySum  int64 `gorm:"column:latency_sum"`
+		LatencyRows int64 `gorm:"column:latency_rows"`
+		OutputTok   int64 `gorm:"column:output_tokens"`
+		GenMs       int64 `gorm:"column:generation_ms"`
+	}
+	// use_time is in seconds; generation_time is derived from the same row so a
+	// TPS figure only counts rows that actually reported a duration.
+	err = LOG_DB.Model(&Log{}).
+		Where("user_id IN ? AND created_at >= ? AND type IN ?",
+			customerIDs, since, []int{LogTypeConsume, LogTypeError}).
+		Select(`COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END),0) AS consumed,
+			COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END),0) AS failed,
+			COALESCE(SUM(CASE WHEN type = ? AND use_time > 0 THEN use_time ELSE 0 END),0) AS latency_sum,
+			COALESCE(SUM(CASE WHEN type = ? AND use_time > 0 THEN 1 ELSE 0 END),0) AS latency_rows,
+			COALESCE(SUM(CASE WHEN type = ? THEN completion_tokens ELSE 0 END),0) AS output_tokens,
+			COALESCE(SUM(CASE WHEN type = ? AND use_time > 0 THEN use_time * 1000 ELSE 0 END),0) AS generation_ms`,
+			LogTypeConsume, LogTypeError, LogTypeConsume, LogTypeConsume, LogTypeConsume, LogTypeConsume).
+		Scan(&counts).Error
+	if err != nil {
+		return health, err
+	}
+
+	health.Requests = counts.Consumed + counts.Failed
+	health.FailedCount = counts.Failed
+	if health.Requests > 0 {
+		health.SuccessRate = float64(counts.Consumed) / float64(health.Requests) * 100
+	}
+	if counts.LatencyRows > 0 {
+		// use_time is stored in seconds; the console shows milliseconds.
+		health.AvgLatencyMs = float64(counts.LatencySum) / float64(counts.LatencyRows) * 1000
+	}
+	if counts.GenMs > 0 {
+		health.AvgTps = float64(counts.OutputTok) / (float64(counts.GenMs) / 1000)
+	}
+	return health, nil
 }
 
 // ResellerOperationAudit is one auditable reseller action. The row is written by

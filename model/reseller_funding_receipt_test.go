@@ -222,3 +222,77 @@ func TestReceiptIsScopedToItsOwner(t *testing.T) {
 	require.NotNil(t, own)
 	assert.Equal(t, receipt.Id, own.Id)
 }
+
+// TestVoidTransferReclaimsExactlyOnce pins the correction path: a wrong funding
+// is undone by appending a reclaim of the same amount, and clicking void twice
+// does not take the quota back twice.
+func TestVoidTransferReclaimsExactlyOnce(t *testing.T) {
+	truncateTables(t)
+	resellerID, customerID := seedPrecreditOwner(t)
+
+	fund, err := TransferResellerQuota(resellerID, customerID, resellerID,
+		ResellerTransferFund, 5000, "evt-void-src", ResellerFundingRecharge, "")
+	require.NoError(t, err)
+
+	reversal, err := VoidResellerTransfer(resellerID, int(fund.Id), resellerID, "typo")
+	require.NoError(t, err)
+	assert.Equal(t, ResellerTransferReclaim, reversal.Direction)
+	assert.Equal(t, int64(5000), reversal.RetailQuota, "the reversal takes back exactly what was funded")
+	assert.Equal(t, fund.Id, reversal.ReversesId)
+
+	// The funded position is back to zero, so nothing is left to reclaim.
+	remaining, err := ResellerReclaimableQuota(resellerID, customerID)
+	require.NoError(t, err)
+	assert.Zero(t, remaining)
+
+	// A second click replays the same reversal instead of reversing again.
+	again, err := VoidResellerTransfer(resellerID, int(fund.Id), resellerID, "typo")
+	require.NoError(t, err)
+	assert.Equal(t, reversal.Id, again.Id)
+
+	remaining, err = ResellerReclaimableQuota(resellerID, customerID)
+	require.NoError(t, err)
+	assert.Zero(t, remaining, "a repeated void must not double-reclaim")
+}
+
+// TestVoidTransferRefusesForeignAndReclaim pins the two shapes that are not a
+// correctable funding: another reseller's row, and a reclaim itself.
+func TestVoidTransferRefusesForeignAndReclaim(t *testing.T) {
+	truncateTables(t)
+	resellerID, customerID := seedPrecreditOwner(t)
+
+	fund, err := TransferResellerQuota(resellerID, customerID, resellerID,
+		ResellerTransferFund, 1000, "evt-void-guard", ResellerFundingRecharge, "")
+	require.NoError(t, err)
+
+	_, err = VoidResellerTransfer(resellerID+999, int(fund.Id), resellerID, "")
+	assert.ErrorIs(t, err, ErrResellerTransferInvalid)
+
+	reversal, err := VoidResellerTransfer(resellerID, int(fund.Id), resellerID, "")
+	require.NoError(t, err)
+	_, err = VoidResellerTransfer(resellerID, int(reversal.Id), resellerID, "")
+	assert.ErrorIs(t, err, ErrResellerTransferInvalid,
+		"voiding a reclaim would mean re-funding, which must be an explicit funding")
+}
+
+// TestVoidTransferRefusesReconciledPrecredit pins that settled credit cannot be
+// silently taken back behind the receipt that accounts for it.
+func TestVoidTransferRefusesReconciledPrecredit(t *testing.T) {
+	truncateTables(t)
+	resellerID, customerID := seedPrecreditOwner(t)
+
+	credit := precredit(t, resellerID, customerID, 2000, "evt-void-reconciled")
+	_, err := CreateResellerFundingReceipt(ResellerFundingReceiptRequest{
+		EventKey:       "evt-receipt-blocks-void",
+		ResellerId:     resellerID,
+		CustomerUserId: customerID,
+		TransferIds:    []int64{credit.Id},
+		Method:         "bank",
+		ActorId:        resellerID,
+		Confirm:        true,
+	})
+	require.NoError(t, err)
+
+	_, err = VoidResellerTransfer(resellerID, int(credit.Id), resellerID, "")
+	assert.ErrorIs(t, err, ErrResellerTransferReconciled)
+}
