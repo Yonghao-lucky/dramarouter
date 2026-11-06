@@ -101,6 +101,12 @@ const LazyPerformanceOverview = lazy(() =>
   }))
 )
 
+const LazyModelRankingTable = lazy(() =>
+  import('./components/models/model-ranking-table').then((m) => ({
+    default: m.ModelRankingTable,
+  }))
+)
+
 const LazyUserCharts = lazy(() =>
   import('./components/users/user-charts').then((m) => ({
     default: m.UserCharts,
@@ -385,6 +391,15 @@ export function Dashboard() {
                     timeGranularity={
                       modelFilters.time_granularity || DEFAULT_TIME_GRANULARITY
                     }
+                  />
+                </Suspense>
+              </FadeIn>
+              <FadeIn delay={0.2}>
+                <Suspense fallback={<ModelChartsFallback />}>
+                  <LazyModelRankingTable
+                    data={modelData}
+                    loading={dataLoading}
+                    filters={modelFilters}
                   />
                 </Suspense>
               </FadeIn>

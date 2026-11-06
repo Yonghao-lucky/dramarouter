@@ -21,8 +21,7 @@ import { useTranslation } from 'react-i18next'
 
 import { IconBadge } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getUserQuotaDates } from '@/features/dashboard/api'
-import { getResellerQuotaDates } from '@/features/reseller/api'
+import { getQuotaRows } from '@/features/dashboard/api'
 import { useModelStatCardsConfig } from '@/features/dashboard/hooks/use-dashboard-config'
 import {
   buildQueryParams,
@@ -95,17 +94,12 @@ export function LogStatCards(props: LogStatCardsProps) {
     const timeDiff = (timeRange.end_timestamp - timeRange.start_timestamp) / 60
     setTimeRangeMinutes(timeDiff)
 
-    const query = isReseller
-      ? getResellerQuotaDates({
-          start_timestamp: timeRange.start_timestamp,
-          end_timestamp: timeRange.end_timestamp,
-        }).then((rows) => ({ data: rows }))
-      : getUserQuotaDates(buildQueryParams(timeRange, filters), isAdmin)
-
-    void query
-      .then((res) => {
+    void getQuotaRows(buildQueryParams(timeRange, filters), {
+      isAdmin,
+      isReseller,
+    })
+      .then((data) => {
         if (abortController.signal.aborted) return
-        const data = (res as { data?: QuotaDataItem[] })?.data || []
         setStats(calculateDashboardStats(data))
         onDataUpdate?.(data, false)
       })

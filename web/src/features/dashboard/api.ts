@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { getResellerQuotaDates } from '@/features/reseller/api'
 import { api } from '@/lib/api'
 
 import type {
@@ -89,6 +90,34 @@ export async function getUserQuotaDataByUsers(params: {
     { params }
   )
   return res.data
+}
+
+/**
+ * Quota rows for the current viewer's scope.
+ *
+ * A reseller is an ordinary account whose own traffic is empty — the rows that
+ * matter are its customers', read through the owner-scoped endpoint. Everyone
+ * else reads the dashboard endpoint, which already narrows admins to all users
+ * and normal users to themselves.
+ */
+export async function getQuotaRows(
+  params: {
+    start_timestamp: number
+    end_timestamp: number
+    default_time: string
+    username?: string
+  },
+  scope: { isAdmin: boolean; isReseller: boolean }
+): Promise<QuotaDataItem[]> {
+  if (scope.isReseller) {
+    const rows = await getResellerQuotaDates({
+      start_timestamp: params.start_timestamp,
+      end_timestamp: params.end_timestamp,
+    })
+    return (rows ?? []) as QuotaDataItem[]
+  }
+  const res = await getUserQuotaDates(params, scope.isAdmin)
+  return (res as { data?: QuotaDataItem[] })?.data ?? []
 }
 
 export async function getFlowQuotaDates(
