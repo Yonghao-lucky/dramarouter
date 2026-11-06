@@ -4,11 +4,13 @@
 # 建议由 cron 每分钟执行一次: * * * * * /opt/dramarouter-secrets/health-watchdog.sh
 set -euo pipefail
 
-UP=/opt/1panel/www/conf.d/00-dramarouter-us-upstream.conf
-CTR=1Panel-openresty-RqEz
-NAME=dramarouter_us
-PORTS=(14010 14011)
-CONTAINERS=(dramarouter-us-a dramarouter-us-b)
+# 默认监控美国生产站；新站通过环境变量覆盖同一套逻辑，避免复制脚本。
+#   WATCHDOG_PORT=14110 WATCHDOG_PORT=14111 之类无法表达数组，故用具名变量。
+UP=${WATCHDOG_UP:-/opt/1panel/www/conf.d/00-dramarouter-us-upstream.conf}
+CTR=${WATCHDOG_CTR:-1Panel-openresty-RqEz}
+NAME=${WATCHDOG_NAME:-dramarouter_us}
+PORTS=(${WATCHDOG_PORTS:-14010 14011})
+CONTAINERS=(${WATCHDOG_CONTAINERS:-dramarouter-us-a dramarouter-us-b})
 
 health_of() {
   # starting 尚未完成首次检查，按可用处理，避免刚启动就被摘掉。
@@ -43,11 +45,14 @@ render() {
     if printf '%s\n' "${down_ports[@]:-}" | grep -qx "$port"; then
       line+=" down;"
     else
-      line+=" max_fails=2 fail_timeout=10s;"
+      # max_fails=0：不按请求失败记账。长流式请求的读超时、发布重启瞬间的
+      # 连接抖动都不是节点故障，记账会把健康节点踢掉；真正的故障由本脚本
+      # 依据容器 healthcheck 摘除，判定更准也更可控。
+      line+=" max_fails=0;"
     fi
     echo "$line"
   done
-  echo "    keepalive 64;"
+  echo "    keepalive 512;"
   echo "}"
 }
 

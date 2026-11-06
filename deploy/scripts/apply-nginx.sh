@@ -28,9 +28,9 @@ location ^~ / {
     proxy_http_version 1.1;
     proxy_set_header Connection "";
     proxy_connect_timeout 30s;
-    proxy_send_timeout 1800s;
-    proxy_read_timeout 1800s;
-    send_timeout 1800s;
+    proxy_send_timeout 3600s;
+    proxy_read_timeout 3600s;
+    send_timeout 3600s;
     client_max_body_size $body;
     client_body_timeout 1200s;
     proxy_buffering off;
