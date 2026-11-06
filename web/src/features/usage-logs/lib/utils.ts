@@ -193,7 +193,9 @@ export function buildApiParams(config: {
     ...(isAdmin && searchParams.channel
       ? { channel: Number(searchParams.channel) || 0 }
       : {}),
-    ...(isAdmin && searchParams.username
+    // A reseller may narrow to one of its own customers by username. The server
+    // applies it inside the caller's scope, so it can never widen a self view.
+    ...(searchParams.username
       ? { username: String(searchParams.username) }
       : {}),
     ...(searchParams.requestId
@@ -227,7 +229,7 @@ export function buildApiParams(config: {
           if (isAdmin) params.channel = Number(value) || 0
           break
         case 'username':
-          if (isAdmin) params.username = String(value)
+          params.username = String(value)
           break
       }
     })

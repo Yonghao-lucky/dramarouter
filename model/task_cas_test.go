@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 		&ResellerTransfer{},
 		&ResellerMarginCreditCursor{},
 		&ResellerWalletGrant{},
+		&ResellerGroupOrder{},
 		&Task{}, &AssetWebhookEndpoint{}, &AssetWebhookDelivery{},
 		&TaskRequestBody{},
 		&User{},

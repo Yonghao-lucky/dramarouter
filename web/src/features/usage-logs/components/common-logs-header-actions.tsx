@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Eye, EyeOff } from 'lucide-react'
+import { getRouteApi } from '@tanstack/react-router'
+import { Download, Eye, EyeOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -26,8 +27,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { buildLogsExportUrl } from '../api'
 import { CommonLogsStats } from './common-logs-stats'
-import { useUsageLogsContext } from './usage-logs-provider'
+import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
+
+const route = getRouteApi('/_authenticated/usage-logs/$section')
 
 /**
  * Page-header actions for the Common Logs view: live usage stats plus a
@@ -39,10 +43,46 @@ import { useUsageLogsContext } from './usage-logs-provider'
 export function CommonLogsHeaderActions() {
   const { t } = useTranslation()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
+  const { isAdminView: isAdmin } = useLogsViewScope()
+  const searchParams = route.useSearch()
+
+  // Export reuses the on-screen filters so the file matches the list, and the
+  // server applies the caller's own scope on top.
+  const exportUrl = buildLogsExportUrl(
+    {
+      type: (searchParams.type as number[] | undefined)?.[0],
+      model_name: searchParams.model as string | undefined,
+      token_name: searchParams.token as string | undefined,
+      group: searchParams.group as string | undefined,
+      username: searchParams.username as string | undefined,
+      start_timestamp: searchParams.startTime as number | undefined,
+      end_timestamp: searchParams.endTime as number | undefined,
+      ...(isAdmin && searchParams.channel
+        ? { channel: Number(searchParams.channel) }
+        : {}),
+    },
+    isAdmin
+  )
 
   return (
     <div className='flex flex-wrap items-center gap-2'>
       <CommonLogsStats />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon'
+              onClick={() => window.open(exportUrl, '_blank')}
+              aria-label={t('Export CSV')}
+              className='text-muted-foreground hover:text-foreground size-7'
+            />
+          }
+        >
+          <Download />
+        </TooltipTrigger>
+        <TooltipContent>{t('Export CSV')}</TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={

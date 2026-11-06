@@ -546,21 +546,23 @@ export function useCommonLogsColumns(
 
   // A reseller reads their customers' usage in the same self log view. The
   // customer name is the only extra column they need: channel identity and
-  // admin fields stay invisible to them.
+  // admin fields stay invisible to them. The id stays `user` so the mobile card,
+  // which looks the field up by that id, shows it too.
   if (showCustomers && !isAdmin) {
     columns.push({
-      id: 'customer',
+      id: 'user',
       header: t('Customer'),
       accessorFn: (row) => row.username,
-      cell: ({ row }) => {
+      cell: function ResellerCustomerCell({ row }) {
+        const { sensitiveVisible } = useUsageLogsContext()
         const log = row.original
         if (!log.username) return null
         return (
           <span
-            className='text-muted-foreground block max-w-[140px] truncate text-xs'
+            className='text-foreground block max-w-[140px] truncate text-xs font-medium'
             title={log.username}
           >
-            {log.username}
+            {sensitiveVisible ? log.username : '••••'}
           </span>
         )
       },

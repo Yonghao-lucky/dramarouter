@@ -644,13 +644,13 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 const logSearchCountLimit = 10000
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, includeAccounting bool) (logs []*Log, total int64, err error) {
-	return GetUserLogsForUsers([]int{userId}, logType, startTimestamp, endTimestamp, modelName, tokenName, startIdx, num, group, requestId, upstreamRequestId, includeAccounting)
+	return GetUserLogsForUsers([]int{userId}, logType, startTimestamp, endTimestamp, modelName, tokenName, startIdx, num, group, requestId, upstreamRequestId, includeAccounting, "")
 }
 
 // GetUserLogsForUsers pages the logs of a set of users. A reseller reads it with
 // their own id plus every customer they own, so the customer logs appear in the
 // same self log view as their own usage rather than a separate console table.
-func GetUserLogsForUsers(userIds []int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, includeAccounting bool) (logs []*Log, total int64, err error) {
+func GetUserLogsForUsers(userIds []int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, includeAccounting bool, username string) (logs []*Log, total int64, err error) {
 	if len(userIds) == 0 {
 		return []*Log{}, 0, nil
 	}
@@ -676,6 +676,11 @@ func GetUserLogsForUsers(userIds []int, logType int, startTimestamp int64, endTi
 	tx = tx.Where("logs.type <> ?", LogTypeBillingCorrection)
 
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
+		return nil, 0, err
+	}
+	// Username narrows within the caller's own scope. For a reseller the scope is
+	// already the caller plus every owned customer, so this can never widen it.
+	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", username); err != nil {
 		return nil, 0, err
 	}
 	if tokenName != "" {

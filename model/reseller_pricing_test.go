@@ -76,6 +76,12 @@ func TestResellerPlatformGroupsListsEveryPlatformGroup(t *testing.T) {
 	require.NoError(t, DB.Create(&User{Id: customerID, Username: "groups_customer", Group: "default", AffCode: "rpg1"}).Error)
 	require.NoError(t, DB.Create(&ResellerGroupCost{ResellerId: resellerID, GroupName: "vip", CostRatio: "0.4", Enabled: true}).Error)
 	require.NoError(t, DB.Create(&CustomerGroupPrice{UserId: customerID, GroupName: "vip", Ratio: "0.9", Source: "reseller"}).Error)
+	// The book lists only groups an enabled channel still serves, so both groups
+	// under test need a live route.
+	require.NoError(t, DB.Create(&Channel{Id: 9301, Name: "groups-channel", Status: common.ChannelStatusEnabled}).Error)
+	for _, group := range []string{"vip", "default"} {
+		require.NoError(t, DB.Create(&Ability{Group: group, Model: "groups-model", ChannelId: 9301, Enabled: true}).Error)
+	}
 
 	rows, err := ResellerPlatformGroups(resellerID, customerID)
 	require.NoError(t, err)

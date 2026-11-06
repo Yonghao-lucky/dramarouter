@@ -253,7 +253,7 @@ export function CommonLogsFilterBar<TData>(
 
   const expandedFilterCount = [
     filters.token,
-    isAdmin ? filters.username : undefined,
+    filters.username,
     isAdmin ? filters.channel : undefined,
     filters.requestId,
     filters.upstreamRequestId,
@@ -380,17 +380,17 @@ export function CommonLogsFilterBar<TData>(
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>
-      {isAdmin && (
-        <LogsFilterField>
-          <LogsFilterInput
-            placeholder={t('Username')}
-            className={sensitiveInputClass}
-            value={filters.username || ''}
-            onChange={(e) => handleChange('username', e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-        </LogsFilterField>
-      )}
+      {/* A reseller filters its own customers by username here; the server
+          applies the value inside the caller's scope. */}
+      <LogsFilterField>
+        <LogsFilterInput
+          placeholder={t('Username')}
+          className={sensitiveInputClass}
+          value={filters.username || ''}
+          onChange={(e) => handleChange('username', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
       {isAdmin && (
         <LogsFilterField>
           <LogsFilterInput

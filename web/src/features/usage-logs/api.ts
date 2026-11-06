@@ -84,6 +84,25 @@ export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
 
+/**
+ * CSV download URL for the current log filters. It points at the same reader the
+ * list uses, so the file obeys the caller's scope: an administrator exports all
+ * users, everyone else exports only what they may already see.
+ */
+export function buildLogsExportUrl(
+  params: GetLogsParams,
+  isAdmin: boolean
+): string {
+  const paramRecord = params as unknown as Record<string, unknown>
+  const queryParams = buildQueryParams({
+    p: 1,
+    page_size: 5000,
+    ...params,
+  })
+  void paramRecord
+  return `${buildApiPath('/api/log', isAdmin)}/export?${queryParams}`
+}
+
 export async function getUserInfo(
   userId: number
 ): Promise<{ success: boolean; message?: string; data?: UserInfo }> {

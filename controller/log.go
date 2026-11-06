@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/csv"
 	"net/http"
 	"strconv"
 
@@ -49,9 +50,11 @@ func GetUserLogs(c *gin.Context) {
 	upstreamRequestId := c.Query("upstream_request_id")
 	// A reseller watches their customers through the same self log view as any
 	// ordinary account: the scope is the caller plus every customer they own,
-	// not a separate console table with its own columns and filters.
+	// not a separate console table with its own columns and filters. The
+	// username filter narrows inside that scope, never outside it.
+	username := c.Query("username")
 	userIds, resellerId := resellerLogScope(userId)
-	logs, total, err := model.GetUserLogsForUsers(userIds, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, canViewFinancialAccounting(c))
+	logs, total, err := model.GetUserLogsForUsers(userIds, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, canViewFinancialAccounting(c), username)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -191,4 +194,63 @@ func GetLogsSelfStat(c *gin.Context) {
 		"data":    data,
 	})
 	return
+}
+
+// GetUserLogsExport streams the caller's own usage logs as CSV. For a reseller
+// the scope is the caller plus every owned customer, exactly like the on-screen
+// list, so the file never contains rows the caller could not already read.
+func GetUserLogsExport(c *gin.Context) {
+	userId := c.GetInt("id")
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	tokenName := c.Query("token_name")
+	modelName := c.Query("model_name")
+	group := c.Query("group")
+	requestId := c.Query("request_id")
+	upstreamRequestId := c.Query("upstream_request_id")
+	username := c.Query("username")
+
+	const maxExportRows = 5000
+	userIds, resellerId := resellerLogScope(userId)
+	logs, _, err := model.GetUserLogsForUsers(userIds, logType, startTimestamp, endTimestamp, modelName, tokenName, 0, maxExportRows, group, requestId, upstreamRequestId, canViewFinancialAccounting(c), username)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.AttachResellerLogMargins(resellerId, logs); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="usage-logs.csv"`)
+	// A BOM keeps Excel from mangling UTF-8 model and user text.
+	_, _ = c.Writer.Write([]byte("\xEF\xBB\xBF"))
+	writer := csv.NewWriter(c.Writer)
+	defer writer.Flush()
+	_ = writer.Write([]string{
+		"id", "created_at", "type", "user_id", "username", "model_name", "group",
+		"token_name", "quota", "prompt_tokens", "completion_tokens", "use_time",
+		"is_stream", "request_id", "content",
+	})
+	for _, row := range logs {
+		_ = writer.Write([]string{
+			strconv.Itoa(row.Id),
+			strconv.FormatInt(row.CreatedAt, 10),
+			strconv.Itoa(row.Type),
+			strconv.Itoa(row.UserId),
+			row.Username,
+			row.ModelName,
+			row.Group,
+			row.TokenName,
+			strconv.Itoa(row.Quota),
+			strconv.Itoa(row.PromptTokens),
+			strconv.Itoa(row.CompletionTokens),
+			strconv.Itoa(row.UseTime),
+			strconv.FormatBool(row.IsStream),
+			row.RequestId,
+			row.Content,
+		})
+	}
 }
