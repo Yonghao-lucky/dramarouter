@@ -146,7 +146,7 @@ function OverviewPanel() {
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         <StatCard
           title={t('My wallet')}
           value={formatQuota(data?.wallet_quota ?? 0)}
@@ -326,14 +326,14 @@ function FundingReceiptPanel(props: { customerId: number }) {
         </div>
 
         <div className='flex flex-col gap-2 rounded-lg border p-3'>
-          <div className='flex flex-wrap items-end gap-2'>
+          <div className='flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end'>
             <Select
               value={method}
               onValueChange={(value) => {
                 if (value) setMethod(value)
               }}
             >
-              <SelectTrigger className='h-9 w-32'>
+              <SelectTrigger className='h-9 w-full sm:w-32'>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -347,20 +347,21 @@ function FundingReceiptPanel(props: { customerId: number }) {
               </SelectContent>
             </Select>
             <Input
-              className='w-48'
+              className='w-full sm:w-48'
               placeholder={t('Statement / invoice number')}
               maxLength={128}
               value={externalRef}
               onChange={(event) => setExternalRef(event.target.value)}
             />
             <Input
-              className='w-48'
+              className='w-full sm:w-48'
               placeholder={t('Remark (optional)')}
               maxLength={255}
               value={remark}
               onChange={(event) => setRemark(event.target.value)}
             />
             <Button
+              className='w-full sm:w-auto'
               disabled={
                 selected.length === 0 || create.isPending || !externalRef.trim()
               }
@@ -550,7 +551,7 @@ function CustomerDetailPanel(props: {
       <div className='flex flex-col gap-4'>
         {data ? (
           <div className='flex min-h-0 flex-col gap-4'>
-            <div className='grid gap-3 sm:grid-cols-4'>
+            <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
               <StatCard
                 title={t('Wallet')}
                 value={formatQuota(data.wallet_quota)}
@@ -573,11 +574,16 @@ function CustomerDetailPanel(props: {
               <div className='mb-2 text-sm font-medium'>
                 {t('Transfer quota')}
               </div>
-              <div className='flex flex-wrap items-end gap-2'>
+              {/* A wrapped row of fixed-width inputs becomes a ragged stack on a
+                  375px screen: each field is narrower than a tap target and the
+                  buttons land wherever they fit. Phones get one full-width
+                  field per line; the desktop row is unchanged. */}
+              <div className='flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end'>
                 <Input
-                  className='w-40'
+                  className='w-full sm:w-40'
                   type='number'
                   min={0}
+                  inputMode='decimal'
                   placeholder={t('Retail quota')}
                   value={fundAmount}
                   onChange={(event) => setFundAmount(event.target.value)}
@@ -590,7 +596,7 @@ function CustomerDetailPanel(props: {
                     }
                   }}
                 >
-                  <SelectTrigger className='h-9 w-32'>
+                  <SelectTrigger className='h-9 w-full sm:w-32'>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -605,28 +611,35 @@ function CustomerDetailPanel(props: {
                   </SelectContent>
                 </Select>
                 <Input
-                  className='w-48'
+                  className='w-full sm:w-48'
                   placeholder={t('Remark (optional)')}
                   maxLength={255}
                   value={fundRemark}
                   onChange={(event) => setFundRemark(event.target.value)}
                 />
-                <Badge variant='secondary' className='h-9 px-3 leading-9'>
+                <Badge
+                  variant='secondary'
+                  className='h-9 w-fit px-3 leading-9'
+                >
                   {data.group}
                 </Badge>
-                <Button
-                  disabled={!fundAmount || transfer.isPending}
-                  onClick={() => transfer.mutate('fund')}
-                >
-                  {t('Fund customer')}
-                </Button>
-                <Button
-                  variant='outline'
-                  disabled={!fundAmount || transfer.isPending}
-                  onClick={() => transfer.mutate('reclaim')}
-                >
-                  {t('Reclaim')}
-                </Button>
+                <div className='grid grid-cols-2 gap-2 sm:flex'>
+                  <Button
+                    className='w-full sm:w-auto'
+                    disabled={!fundAmount || transfer.isPending}
+                    onClick={() => transfer.mutate('fund')}
+                  >
+                    {t('Fund customer')}
+                  </Button>
+                  <Button
+                    className='w-full sm:w-auto'
+                    variant='outline'
+                    disabled={!fundAmount || transfer.isPending}
+                    onClick={() => transfer.mutate('reclaim')}
+                  >
+                    {t('Reclaim')}
+                  </Button>
+                </div>
                 <p className='text-muted-foreground basis-full text-xs'>
                   {t(
                     'Funding moves quota from your wallet into the customer wallet one to one. Your profit is the difference between your retail price and your wholesale cost, collected as pending margin you credit from the Profit tab.'
@@ -1284,7 +1297,7 @@ function CustomerFilter(props: {
         value={props.value || '0'}
         onValueChange={(next) => props.onChange(next === '0' ? '' : (next ?? ''))}
       >
-        <SelectTrigger className='w-56'>
+        <SelectTrigger className='w-full sm:w-56'>
           <SelectValue placeholder={t('All customers')} />
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
@@ -1329,6 +1342,61 @@ function TransfersPanel() {
         onRefresh={() => void transfers.refetch()}
         refreshing={transfers.isFetching}
       />
+      {/* Seven columns cannot be read on a phone without dragging sideways;
+          cards keep the same fields in a vertical scan. */}
+      <div className='flex flex-col gap-2 md:hidden'>
+        {(transfers.data ?? []).map((row) => (
+          <Card key={row.id}>
+            <CardContent className='flex flex-col gap-2 py-3'>
+              <div className='flex items-start justify-between gap-2'>
+                <span className='text-xs text-muted-foreground'>
+                  {new Date(row.created_at * 1000).toLocaleString()}
+                </span>
+                <Badge
+                  variant={row.direction === 'fund' ? 'default' : 'secondary'}
+                >
+                  {row.direction === 'fund' ? t('Fund') : t('Reclaim')}
+                </Badge>
+              </div>
+              <div className='grid grid-cols-3 gap-2 text-xs'>
+                <div>
+                  <div className='text-muted-foreground'>{t('Customer')}</div>
+                  <div className='tabular-nums'>#{row.customer_user_id}</div>
+                </div>
+                <div>
+                  <div className='text-muted-foreground'>{t('Retail')}</div>
+                  <div className='tabular-nums'>
+                    {formatQuota(row.retail_quota)}
+                  </div>
+                </div>
+                <div>
+                  <div className='text-muted-foreground'>{t('Cost')}</div>
+                  <div className='tabular-nums'>
+                    {formatQuota(row.cost_quota)}
+                  </div>
+                </div>
+              </div>
+              <div className='text-muted-foreground flex flex-wrap gap-x-3 text-xs'>
+                <span>
+                  {t('Group')}: {row.group || '—'}
+                </span>
+                <span>
+                  {t('Rates')}: {row.cost_ratio} / {row.retail_ratio}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        {(transfers.data ?? []).length === 0 ? (
+          <Card className='md:hidden'>
+            <CardContent className='text-muted-foreground py-8 text-center text-sm'>
+              {t('No records yet')}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+
+      <div className='hidden md:block'>
       <Table>
         <TableHeader>
           <TableRow>
@@ -1372,6 +1440,7 @@ function TransfersPanel() {
           ) : null}
         </TableBody>
       </Table>
+      </div>
     </div>
   )
 }
@@ -1455,7 +1524,7 @@ function LogsPanel() {
       />
       <div className='flex flex-wrap items-center gap-2'>
         <Input
-          className='w-56'
+          className='w-full sm:w-56'
           placeholder={t('Search by model')}
           value={modelName}
           onChange={(event) => setModelName(event.target.value)}
@@ -1478,6 +1547,38 @@ function LogsPanel() {
           {t('Export CSV')}
         </Button>
       </div>
+      <div className='flex flex-col gap-2 md:hidden'>
+        {(logs.data?.items ?? []).map((row) => (
+          <Card key={row.id}>
+            <CardContent className='flex flex-col gap-2 py-3'>
+              <div className='flex items-start justify-between gap-2'>
+                <span className='font-mono text-xs'>{row.model_name}</span>
+                <span className='text-muted-foreground text-xs tabular-nums'>
+                  {formatQuota(row.quota)}
+                </span>
+              </div>
+              <div className='text-muted-foreground flex flex-wrap gap-x-3 text-xs'>
+                <span>#{row.user_id}</span>
+                <span>{new Date(row.created_at * 1000).toLocaleString()}</span>
+              </div>
+              {row.content ? (
+                <p className='text-muted-foreground line-clamp-3 text-xs'>
+                  {row.content}
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ))}
+        {(logs.data?.items ?? []).length === 0 ? (
+          <Card>
+            <CardContent className='text-muted-foreground py-8 text-center text-sm'>
+              {t('No records yet')}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+
+      <div className='hidden md:block'>
       <Table>
         <TableHeader>
           <TableRow>
@@ -1509,6 +1610,7 @@ function LogsPanel() {
           ) : null}
         </TableBody>
       </Table>
+      </div>
     </div>
   )
 }
@@ -1553,7 +1655,7 @@ function ProfitPanel() {
 
   return (
     <div className='flex flex-col gap-3'>
-      <div className='grid gap-3 sm:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
         <StatCard
           title={t('Consumption (31d)')}
           value={formatQuota(total.revenue)}
@@ -1716,27 +1818,62 @@ function PriceBookPanel() {
 
 export function Reseller() {
   const { t } = useTranslation()
+  // Thirteen tabs never fit a 375px screen: the strip scrolls, hides the active
+  // tab, and every switch needs a horizontal drag. Phones get a labelled picker
+  // instead, which shows the current section without scrolling.
+  const [section, setSection] = useState('overview')
+  const sections: Array<{ value: string; label: string }> = [
+    { value: 'overview', label: t('Overview') },
+    { value: 'customers', label: t('Customers') },
+    { value: 'transfers', label: t('Transfers') },
+    { value: 'usage', label: t('Usage') },
+    { value: 'logs', label: t('Logs') },
+    { value: 'profit', label: t('Profit') },
+    { value: 'prices', label: t('Price book') },
+    { value: 'wallet', label: t('Wallet history') },
+    { value: 'settlements', label: t('Settlements') },
+    { value: 'dashboard', label: t('Customer data') },
+    { value: 'templates', label: t('Price templates') },
+    { value: 'alert', label: t('Alerts') },
+    { value: 'audit', label: t('Audit') },
+  ]
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Reseller console')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <Tabs defaultValue='overview' className='flex flex-col gap-4'>
-          {/* Tab labels wrap on desktop but scroll horizontally on phones,
-              where wrapping six-plus tabs would push content off screen. */}
-          <TabsList className='max-w-full flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible'>
-            <TabsTrigger value='overview'>{t('Overview')}</TabsTrigger>
-            <TabsTrigger value='customers'>{t('Customers')}</TabsTrigger>
-            <TabsTrigger value='transfers'>{t('Transfers')}</TabsTrigger>
-            <TabsTrigger value='usage'>{t('Usage')}</TabsTrigger>
-            <TabsTrigger value='logs'>{t('Logs')}</TabsTrigger>
-            <TabsTrigger value='profit'>{t('Profit')}</TabsTrigger>
-            <TabsTrigger value='prices'>{t('Price book')}</TabsTrigger>
-            <TabsTrigger value='wallet'>{t('Wallet history')}</TabsTrigger>
-            <TabsTrigger value='settlements'>{t('Settlements')}</TabsTrigger>
-            <TabsTrigger value='dashboard'>{t('Customer data')}</TabsTrigger>
-            <TabsTrigger value='templates'>{t('Price templates')}</TabsTrigger>
-            <TabsTrigger value='alert'>{t('Alerts')}</TabsTrigger>
-            <TabsTrigger value='audit'>{t('Audit')}</TabsTrigger>
+        <Tabs
+          value={section}
+          onValueChange={setSection}
+          className='flex flex-col gap-4'
+        >
+          <div className='sm:hidden'>
+            <Select
+              value={section}
+              onValueChange={(value) => {
+                if (value) setSection(value)
+              }}
+            >
+              <SelectTrigger className='w-full' aria-label={t('Section')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {sections.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <TabsList className='hidden max-w-full flex-wrap sm:flex'>
+            {sections.map((item) => (
+              <TabsTrigger key={item.value} value={item.value}>
+                {item.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
           <TabsContent value='overview'>
             <OverviewPanel />
@@ -1796,7 +1933,7 @@ function WalletPanel() {
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         <StatCard
           title={t('Total recharged')}
           value={formatQuota(
@@ -1887,7 +2024,7 @@ function DashboardPanel() {
             if (value) setDays(value)
           }}
         >
-          <SelectTrigger className='w-32'>
+          <SelectTrigger className='w-full sm:w-32'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -1903,7 +2040,7 @@ function DashboardPanel() {
         </span>
       </div>
 
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         <StatCard
           title={t('My customers')}
           value={String(data?.customer_count ?? 0)}
@@ -1933,7 +2070,7 @@ function DashboardPanel() {
         />
       </div>
 
-      <div className='grid gap-3 sm:grid-cols-3'>
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
         <StatCard
           title={t('Success rate')}
           value={
@@ -2106,6 +2243,18 @@ function DashboardPanel() {
 // ---------------------------------------------------------------------------
 // Settlement ledger and its CSV export.
 // ---------------------------------------------------------------------------
+/** Settlement status badge, shared by the phone cards and the desktop table. */
+function SettlementStatusBadge(props: { status: string }) {
+  const { t } = useTranslation()
+  if (props.status === 'confirmed') {
+    return <Badge>{t('Confirmed')}</Badge>
+  }
+  if (props.status === 'void') {
+    return <Badge variant='destructive'>{t('Void')}</Badge>
+  }
+  return <Badge variant='secondary'>{t('Pending')}</Badge>
+}
+
 function SettlementsPanel() {
   const { t } = useTranslation()
   const [status, setStatus] = useState('')
@@ -2122,7 +2271,7 @@ function SettlementsPanel() {
           value={status || 'all'}
           onValueChange={(value) => setStatus(!value || value === 'all' ? '' : value)}
         >
-          <SelectTrigger className='w-36'>
+          <SelectTrigger className='w-full sm:w-36'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -2145,6 +2294,54 @@ function SettlementsPanel() {
         </Button>
       </div>
 
+      <div className='flex flex-col gap-2 md:hidden'>
+        {(settlements.data ?? []).map((row) => (
+          <Card key={row.id}>
+            <CardContent className='flex flex-col gap-2 py-3'>
+              <div className='flex items-start justify-between gap-2'>
+                <span className='text-xs text-muted-foreground'>
+                  {new Date(row.created_at * 1000).toLocaleString()}
+                </span>
+                <SettlementStatusBadge status={row.status} />
+              </div>
+              <div className='grid grid-cols-2 gap-2 text-xs'>
+                <div>
+                  <div className='text-muted-foreground'>
+                    {t('Paid amount')}
+                  </div>
+                  <div className='tabular-nums'>
+                    {(row.amount_minor / 100).toFixed(2)} {row.currency}
+                  </div>
+                </div>
+                <div>
+                  <div className='text-muted-foreground'>
+                    {t('Quota credited')}
+                  </div>
+                  <div className='tabular-nums'>
+                    {formatQuota(row.quota_amount)}
+                  </div>
+                </div>
+              </div>
+              <div className='text-muted-foreground flex flex-wrap gap-x-3 text-xs'>
+                <span>
+                  {row.direction === 'in' ? t('I paid') : t('Refund')}
+                </span>
+                <span>{row.method || '-'}</span>
+                <span className='truncate'>{row.external_ref || '-'}</span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        {(settlements.data ?? []).length === 0 ? (
+          <Card>
+            <CardContent className='text-muted-foreground py-8 text-center text-sm'>
+              {t('No records yet')}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+
+      <div className='hidden md:block'>
       <Table>
         <TableHeader>
           <TableRow>
@@ -2167,21 +2364,7 @@ function SettlementsPanel() {
                 {row.direction === 'in' ? t('I paid') : t('Refund')}
               </TableCell>
               <TableCell>
-                <Badge
-                  variant={
-                    row.status === 'confirmed'
-                      ? 'default'
-                      : row.status === 'void'
-                        ? 'destructive'
-                        : 'secondary'
-                  }
-                >
-                  {row.status === 'confirmed'
-                    ? t('Confirmed')
-                    : row.status === 'void'
-                      ? t('Void')
-                      : t('Pending')}
-                </Badge>
+                <SettlementStatusBadge status={row.status} />
               </TableCell>
               <TableCell className='tabular-nums'>
                 {(row.amount_minor / 100).toFixed(2)} {row.currency}
@@ -2200,6 +2383,7 @@ function SettlementsPanel() {
           ) : null}
         </TableBody>
       </Table>
+      </div>
     </div>
   )
 }

@@ -8884,7 +8884,8 @@
     "Transfer voided": "Transfer voided",
     "Active customers": "Active customers",
     "{{count}} new in this window": "{{count}} new in this window",
-    "{{count}} failed": "{{count}} failed"
+    "{{count}} failed": "{{count}} failed",
+    "Section": "Section"
   },
   "Starting at": "Starting at",
   "per image": "per image"

@@ -8946,6 +8946,7 @@
     "Transfer voided": "划拨已作废",
     "Active customers": "活跃客户",
     "{{count}} new in this window": "本周期新增 {{count}} 个",
-    "{{count}} failed": "{{count}} 次失败"
+    "{{count}} failed": "{{count}} 次失败",
+    "Section": "板块"
   }
 }
