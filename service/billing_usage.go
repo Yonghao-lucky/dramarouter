@@ -203,7 +203,14 @@ func usageFromGeminiBillingUsage(billingUsage *dto.BillingUsage) *dto.Usage {
 
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	} else if usage.CompletionTokens <= 0 {
+	} else if usage.CompletionTokens <= 0 && usage.TotalTokens > usage.PromptTokens {
+		// Only derive completion from the upstream total when the total is
+		// actually larger than the prompt. Vertex Gemini can report a
+		// totalTokenCount smaller than promptTokenCount (or even negative) on
+		// truncated/aborted streams; subtracting there yielded negative
+		// completion tokens that leaked into logs and usage metrics. Keeping
+		// zero instead routes the request into the existing "no billable
+		// usage" branch.
 		usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
 	}
 	if usage.PromptTokens > 0 && usage.PromptTokensDetails.TextTokens == 0 && usage.PromptTokensDetails.AudioTokens == 0 {

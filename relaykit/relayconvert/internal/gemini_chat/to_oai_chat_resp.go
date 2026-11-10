@@ -65,7 +65,11 @@ func UsageFromGeminiMetadata(metadata *dto.GeminiUsageMetadata, fallbackPromptTo
 		}
 	}
 
-	if usage.TotalTokens > 0 && usage.CompletionTokens <= 0 {
+	// Derive completion tokens from the upstream total only when that total
+	// really exceeds the prompt. A smaller (or negative) totalTokenCount means
+	// the upstream usage metadata is incomplete, not that the response produced
+	// negative output.
+	if usage.TotalTokens > usage.PromptTokens && usage.CompletionTokens <= 0 {
 		usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
 	}
 
