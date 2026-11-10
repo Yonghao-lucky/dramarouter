@@ -10,6 +10,8 @@
 # 环境变量:
 #   DRAIN_SECONDS  摘除后端后等待旧连接排空的秒数，默认 10
 #   FORCE=1        两台不全是 healthy 时仍强制滚动（会放弃零停机保证）
+#   STOP_TIMEOUT   停容器时等待在途请求完成的秒数，默认沿用 compose 的 stop_grace_period。
+#                  紧急止血时可设小值（如 5），在途的长请求会被中断
 set -euo pipefail
 
 usage() {
@@ -81,6 +83,8 @@ esac
 IMG="${IMG:-$DEFAULT_IMG}"
 CTR=1Panel-openresty-RqEz
 DRAIN_SECONDS="${DRAIN_SECONDS:-10}"
+STOP_ARGS=()
+if [ -n "${STOP_TIMEOUT:-}" ]; then STOP_ARGS=(-t "$STOP_TIMEOUT"); fi
 
 SERVICES=(app-a app-b)
 
@@ -181,7 +185,7 @@ roll_one() {  # $1 = 服务下标
   set_upstream "$peer"
   sleep "$DRAIN_SECONDS"
   ROLLED+=("$svc")
-  ( cd "$PROJ" && docker compose stop "$svc" && docker compose up -d --no-deps --force-recreate "$svc" )
+  ( cd "$PROJ" && docker compose stop "${STOP_ARGS[@]}" "$svc" && docker compose up -d --no-deps --force-recreate "$svc" )
   wait_healthy "$port"
   # 更新完的这台重新加入，与另一台一起接流量
   set_upstream "$(healthy_ports)"
@@ -218,7 +222,7 @@ rollback() {
     echo "--- 回滚 $svc ($port)，流量留在 $peer" >&2
     if ! set_upstream "$peer"; then break; fi
     sleep "$DRAIN_SECONDS"
-    if ! ( cd "$PROJ" && docker compose stop "$svc" && docker compose up -d --no-deps --force-recreate "$svc" ); then
+    if ! ( cd "$PROJ" && docker compose stop "${STOP_ARGS[@]}" "$svc" && docker compose up -d --no-deps --force-recreate "$svc" ); then
       echo "!!! $svc 回滚重建失败，请人工处理" >&2
       break
     fi

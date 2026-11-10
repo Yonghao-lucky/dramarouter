@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -207,6 +208,22 @@ func appendBillingEntry(tx *gorm.DB, user *User, entry *BillingEntry) error {
 		"first_sequence": hour.FirstSequence, "last_sequence": entry.Sequence,
 	}).Error
 }
+
+// billingWalletLocks serialises one user's wallet transactions inside this
+// process before they take a database connection. Every wallet transaction
+// locks the user row FOR UPDATE, so a single busy customer would otherwise park
+// hundreds of pooled connections on that one row lock and starve every other
+// query (dashboards, logs, other customers). Queuing here keeps the waiters as
+// goroutines and leaves at most one connection per process on the row.
+var billingWalletLocks sync.Map
+
+func lockBillingWallet(userID int) func() {
+	value, _ := billingWalletLocks.LoadOrStore(userID, &sync.Mutex{})
+	mutex := value.(*sync.Mutex)
+	mutex.Lock()
+	return mutex.Unlock
+}
+
 func changeBillingWallet(tx *gorm.DB, user *User, delta int64) error {
 	if delta > int64(common.MaxWalletQuota) || delta < -int64(common.MaxWalletQuota) || int64(user.Quota) > int64(common.MaxWalletQuota)-delta || int64(user.Quota) < -int64(common.MaxWalletQuota)-delta {
 		return ErrWalletQuotaLimitExceeded
@@ -218,6 +235,7 @@ func BeginBillingOperation(op *BillingOperation) error {
 	if op.ID == "" || op.Reserved < 0 || op.Reserved > int64(common.MaxWalletQuota) {
 		return errors.New("invalid billing reservation")
 	}
+	defer lockBillingWallet(op.UserID)()
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).First(&user, op.UserID).Error; err != nil {
@@ -241,6 +259,7 @@ func ResizeBillingReservation(id string, userID int, target int64) error {
 	if target < 0 || target > int64(common.MaxWalletQuota) {
 		return errors.New("invalid billing reservation")
 	}
+	defer lockBillingWallet(userID)()
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).First(&user, userID).Error; err != nil {
@@ -263,6 +282,7 @@ func ResizeBillingReservation(id string, userID int, target int64) error {
 	}
 	return err
 }
+
 // BillingUsageDelta 承载必须与钱包结算同事务提交的聚合用量计数。
 // 拆成独立的内存批处理会在线程池刷库失败或进程重启时静默丢失，
 // 导致 users.used_quota 与 billing_entries 永久对不上。
@@ -282,6 +302,7 @@ func FinishBillingOperationWithUsage(id string, userID int, actual int64, refund
 	if actual < 0 || actual > int64(common.MaxWalletQuota) {
 		return errors.New("invalid billing charge")
 	}
+	defer lockBillingWallet(userID)()
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).First(&user, userID).Error; err != nil {
@@ -347,6 +368,7 @@ func PostBillingAdjustmentWithUsage(entry *BillingEntry, override *int, usage Bi
 		return false, errors.New("invalid billing event key")
 	}
 	applied := false
+	defer lockBillingWallet(entry.UserID)()
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).First(&user, entry.UserID).Error; err != nil {
@@ -419,6 +441,7 @@ func AdjustBillingTaskQuotaWithUsage(task *Task, target int, modelName string, u
 		return false, errors.New("invalid task charge")
 	}
 	applied := false
+	defer lockBillingWallet(task.UserId)()
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).First(&user, task.UserId).Error; err != nil {
@@ -470,6 +493,7 @@ func RefundBillingMidjourney(task *Midjourney, modelName string) (bool, error) {
 // 避免退款成功而 used_quota 未回减导致的永久偏差。
 func RefundBillingMidjourneyWithUsage(task *Midjourney, modelName string, usage BillingUsageDelta) (bool, error) {
 	applied := false
+	defer lockBillingWallet(task.UserId)()
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).First(&user, task.UserId).Error; err != nil {
