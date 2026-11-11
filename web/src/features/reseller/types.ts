@@ -26,7 +26,10 @@ export interface ResellerSummary {
   reclaimed_cost_quota: number
   customer_balance_quota: number
   revenue_quota: number
+  /** Lifetime earnings: credited plus still claimable. */
   margin_quota: number
+  /** The part of the margin already moved into the wallet. */
+  credited_margin_quota: number
   /** Earned but not yet moved into the wallet. Crediting is manual. */
   pending_margin_quota: number
   last_activity_at: number

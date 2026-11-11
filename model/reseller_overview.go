@@ -4,23 +4,24 @@ package model
 // wallet and everything the reseller console shows for itself, in one row so the
 // admin table needs no per-row request.
 type ResellerOverviewRow struct {
-	ResellerId         int    `json:"reseller_id"`
-	Username           string `json:"username"`
-	DisplayName        string `json:"display_name"`
-	Name               string `json:"name"`
-	Code               string `json:"code"`
-	Status             int    `json:"status"`
-	WalletQuota        int64  `json:"wallet_quota"`
-	CustomerCount      int64  `json:"customer_count"`
-	CustomerBalance    int64  `json:"customer_balance_quota"`
-	FundedQuota        int64  `json:"funded_quota"`
-	RevenueQuota       int64  `json:"revenue_quota"`
-	MarginQuota        int64  `json:"margin_quota"`
-	PendingMarginQuota int64  `json:"pending_margin_quota"`
-	GrantedRecharge    int64  `json:"granted_recharge_quota"`
-	GrantedPrecredit   int64  `json:"granted_precredit_quota"`
-	LastActivityAt     int64  `json:"last_activity_at"`
-	CreatedAt          int64  `json:"created_at"`
+	ResellerId          int    `json:"reseller_id"`
+	Username            string `json:"username"`
+	DisplayName         string `json:"display_name"`
+	Name                string `json:"name"`
+	Code                string `json:"code"`
+	Status              int    `json:"status"`
+	WalletQuota         int64  `json:"wallet_quota"`
+	CustomerCount       int64  `json:"customer_count"`
+	CustomerBalance     int64  `json:"customer_balance_quota"`
+	FundedQuota         int64  `json:"funded_quota"`
+	RevenueQuota        int64  `json:"revenue_quota"`
+	MarginQuota         int64  `json:"margin_quota"`
+	CreditedMarginQuota int64  `json:"credited_margin_quota"`
+	PendingMarginQuota  int64  `json:"pending_margin_quota"`
+	GrantedRecharge     int64  `json:"granted_recharge_quota"`
+	GrantedPrecredit    int64  `json:"granted_precredit_quota"`
+	LastActivityAt      int64  `json:"last_activity_at"`
+	CreatedAt           int64  `json:"created_at"`
 }
 
 // ListResellerOverviews aggregates every reseller in a fixed number of queries,
@@ -100,24 +101,28 @@ func ListResellerOverviews() ([]ResellerOverviewRow, error) {
 		}
 	}
 
-	var pendingRows []struct {
-		Owner int64 `gorm:"column:owner"`
-		Total int64 `gorm:"column:total"`
-	}
-	if err := DB.Model(&CostAccountingSnapshot{}).
-		Joins("LEFT JOIN reseller_margin_credit_cursors c ON c.owner_id = cost_accounting_snapshots.owner_id").
-		Where("cost_accounting_snapshots.owner_id > 0").
-		Where("cost_accounting_snapshots.reseller_settlement = ?", "self").
-		Where("cost_accounting_snapshots.id > COALESCE(c.last_snapshot_id, 0)").
-		Select("cost_accounting_snapshots.owner_id AS owner, COALESCE(SUM(cost_accounting_snapshots.reseller_margin_quota),0) AS total").
-		Group("cost_accounting_snapshots.owner_id").
-		Scan(&pendingRows).Error; err != nil {
-		return nil, err
-	}
-	for _, agg := range pendingRows {
-		if i, ok := index[int(agg.Owner)]; ok {
-			rows[i].PendingMarginQuota = agg.Total
+	// Margin is reported with the same paging a claim uses. A claim credits a page
+	// only when the page total is positive, so a plain SUM would report less than
+	// the wallet can actually receive. `margin_quota` is everything earned
+	// (credited plus still claimable); `pending_margin_quota` is what a claim
+	// right now would pay.
+	for i := range rows {
+		ownerId := rows[i].ResellerId
+		pending, err := SumClaimableResellerMargin(ownerId, 0)
+		if err != nil {
+			return nil, err
 		}
+		if pending < 0 {
+			// A net-negative history earns nothing; never show a negative profit.
+			pending = 0
+		}
+		credited, err := CreditedResellerMargin(ownerId)
+		if err != nil {
+			return nil, err
+		}
+		rows[i].PendingMarginQuota = pending
+		rows[i].CreditedMarginQuota = credited
+		rows[i].MarginQuota = credited + pending
 	}
 
 	var grantRows []struct {

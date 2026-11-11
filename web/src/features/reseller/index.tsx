@@ -173,12 +173,17 @@ function OverviewPanel() {
           hint={t('At your retail prices')}
         />
         <StatCard
-          title={t('Realized margin')}
+          title={t('Total profit')}
           value={formatQuota(data?.margin_quota ?? 0)}
-          hint={t('Retail minus your wholesale cost')}
+          hint={t('Credited plus claimable')}
         />
         <StatCard
-          title={t('Pending margin')}
+          title={t('Credited profit')}
+          value={formatQuota(data?.credited_margin_quota ?? 0)}
+          hint={t('Already moved into your wallet')}
+        />
+        <StatCard
+          title={t('Pending profit')}
           value={formatQuota(data?.pending_margin_quota ?? 0)}
           hint={t('Credit it from the Profit tab')}
         />
@@ -1660,10 +1665,14 @@ function ProfitPanel() {
           title={t('Consumption (31d)')}
           value={formatQuota(total.revenue)}
         />
-        <StatCard title={t('Margin (31d)')} value={formatQuota(total.margin)} />
+        <StatCard
+          title={t('Net margin (31d)')}
+          value={formatQuota(total.margin)}
+          hint={t('Daily view nets losses; claiming skips them')}
+        />
         <StatCard title={t('Requests')} value={String(total.requests)} />
         <StatCard
-          title={t('Pending margin')}
+          title={t('Pending profit')}
           value={formatQuota(pending)}
           hint={t('Available to credit into your wallet')}
         />

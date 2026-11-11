@@ -104,7 +104,10 @@ func TestResellerMarginClaimNeverDebitsTheWallet(t *testing.T) {
 
 	pending, err := PendingResellerMarginQuota(ownerID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(-113), pending, "a loss is reported as negative pending margin")
+	// The console reports what a claim pays, and a claim pays nothing for a page
+	// that nets to a loss. A negative figure here would promise money the wallet
+	// never receives.
+	assert.Equal(t, int64(0), pending, "a loss is not reported as claimable margin")
 
 	credited, err := ClaimResellerMargin(ownerID)
 	require.NoError(t, err)

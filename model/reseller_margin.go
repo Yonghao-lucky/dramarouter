@@ -119,12 +119,17 @@ func CreditResellerMargin(ownerId int, batch ResellerMarginCreditBatch) (bool, e
 		cursor.UpdatedAt = now
 		return tx.Model(&cursor).Updates(map[string]any{"last_snapshot_id": cursor.LastSnapshotId, "updated_at": now}).Error
 	})
+	if err == nil {
+		// Every cached claimable figure for this owner is now stale: claiming
+		// moves margin from pending into the wallet.
+		_ = InvalidateResellerClaimableMarginCache(ownerId)
+	}
 	return applied, err
 }
 
 // PendingResellerMarginQuota is the margin the reseller has earned but not yet
-// moved into the wallet. It is everything after the credit watermark, so it
-// stays a single indexed range scan.
+// moved into the wallet. It is everything after the credit watermark, aggregated
+// with the same paging a claim uses so the figure matches the wallet.
 func PendingResellerMarginQuota(ownerId int) (int64, error) {
 	if ownerId <= 0 {
 		return 0, nil
@@ -134,17 +139,10 @@ func PendingResellerMarginQuota(ownerId int) (int64, error) {
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, err
 	}
-	var row struct {
-		Total int64 `gorm:"column:total"`
-	}
-	err = DB.Model(&CostAccountingSnapshot{}).
-		Where("owner_id = ? AND reseller_settlement = ? AND id > ?", ownerId, "self", cursor.LastSnapshotId).
-		Select("COALESCE(SUM(reseller_margin_quota),0) AS total").
-		Scan(&row).Error
-	if err != nil {
-		return 0, err
-	}
-	return row.Total, nil
+	// Report exactly what a claim would pay. A claim skips pages that net to
+	// zero or below instead of netting them against profitable pages, so a plain
+	// SUM would show less than the wallet actually receives.
+	return SumClaimableResellerMargin(ownerId, cursor.LastSnapshotId)
 }
 
 // ClaimResellerMargin drains every pending batch into the reseller wallet and

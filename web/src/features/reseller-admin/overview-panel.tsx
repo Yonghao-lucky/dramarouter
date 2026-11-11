@@ -97,7 +97,7 @@ export function OverviewPanel(props: OverviewPanelProps) {
           hint={t('Pre-authorized credit not yet paid for')}
         />
         <StatCard
-          title={t('Pending margin')}
+          title={t('Pending profit')}
           value={formatQuota(totals.pendingMargin)}
           hint={t('Earned margin still inside reseller wallets')}
         />
@@ -148,7 +148,9 @@ export function OverviewPanel(props: OverviewPanelProps) {
                       </div>
                     </div>
                     <div>
-                      <div className='text-muted-foreground'>{t('Margin')}</div>
+                      <div className='text-muted-foreground'>
+                        {t('Total profit')}
+                      </div>
                       <div className='tabular-nums'>
                         {formatQuota(row.margin_quota)}
                       </div>
@@ -194,8 +196,8 @@ export function OverviewPanel(props: OverviewPanelProps) {
             <TableHead>{t('Customer balance')}</TableHead>
             <TableHead>{t('Funded')}</TableHead>
             <TableHead>{t('Revenue')}</TableHead>
-            <TableHead>{t('Margin')}</TableHead>
-            <TableHead>{t('Pending margin')}</TableHead>
+            <TableHead>{t('Total profit')}</TableHead>
+            <TableHead>{t('Pending profit')}</TableHead>
             <TableHead>{t('Grants')}</TableHead>
             <TableHead>{t('Last activity')}</TableHead>
             <TableHead>{t('Actions')}</TableHead>

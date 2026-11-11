@@ -23,7 +23,10 @@ type ResellerSummary struct {
 	ReclaimedCostQuota int64 `json:"reclaimed_cost_quota"`
 	CustomerBalance    int64 `json:"customer_balance_quota"`
 	RevenueQuota       int64 `json:"revenue_quota"`
-	MarginQuota        int64 `json:"margin_quota"`
+	// MarginQuota is lifetime earnings: credited plus still claimable.
+	MarginQuota int64 `json:"margin_quota"`
+	// CreditedMarginQuota is the part already moved into the wallet.
+	CreditedMarginQuota int64 `json:"credited_margin_quota"`
 	// PendingMarginQuota is earned margin that the reseller has not yet moved
 	// into the wallet. Claiming it is an explicit action in the console.
 	PendingMarginQuota int64 `json:"pending_margin_quota"`
@@ -128,20 +131,32 @@ func GetResellerSummary(resellerUserId int) (*ResellerSummary, error) {
 	summary.CustomerBalance = balance.Total
 	var usage struct {
 		Revenue int64 `gorm:"column:revenue_quota"`
-		Margin  int64 `gorm:"column:margin_quota"`
 	}
 	if err := DB.Model(&CostAccountingSnapshot{}).
 		Where("owner_id = ?", resellerUserId).
-		Select("COALESCE(SUM(revenue_quota),0) AS revenue_quota, COALESCE(SUM(reseller_margin_quota),0) AS margin_quota").
+		Select("COALESCE(SUM(revenue_quota),0) AS revenue_quota").
 		Scan(&usage).Error; err != nil {
 		return nil, err
 	}
-	summary.RevenueQuota, summary.MarginQuota = usage.Revenue, usage.Margin
+	summary.RevenueQuota = usage.Revenue
+
+	// Margin uses the claim's own paging so the console never shows a figure the
+	// wallet will not pay. `margin_quota` is lifetime earnings (already credited
+	// plus still claimable); `pending_margin_quota` is what a claim pays now.
 	pending, err := PendingResellerMarginQuota(resellerUserId)
 	if err != nil {
 		return nil, err
 	}
+	if pending < 0 {
+		pending = 0
+	}
+	credited, err := CreditedResellerMargin(resellerUserId)
+	if err != nil {
+		return nil, err
+	}
 	summary.PendingMarginQuota = pending
+	summary.CreditedMarginQuota = credited
+	summary.MarginQuota = credited + pending
 	return summary, nil
 }
 

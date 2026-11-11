@@ -93,6 +93,7 @@ export interface ResellerOverviewRow {
   funded_quota: number
   revenue_quota: number
   margin_quota: number
+  credited_margin_quota: number
   pending_margin_quota: number
   granted_recharge_quota: number
   granted_precredit_quota: number
