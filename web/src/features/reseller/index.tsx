@@ -1769,7 +1769,9 @@ function PriceBookPanel() {
         // standing price sit in labelled cells with real numbers instead
         // of one muted sentence the reseller has to parse.
         const cost = row.sellable ? row.cost_ratio : ''
-        const price = row.sellable ? row.ratio || row.cost_ratio : ''
+        // Never fall back to the wholesale cost here: an unpriced group shows
+        // the neutral default the backend charges instead of the purchase price.
+        const price = row.ratio
         const margin =
           Number(cost) > 0 && Number(price) > 0
             ? `${(((Number(price) - Number(cost)) / Number(price)) * 100).toFixed(1)}%`

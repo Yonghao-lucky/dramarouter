@@ -617,6 +617,10 @@ func ResellerPlatformGroups(resellerUserId, customerUserId int) ([]ResellerPlatf
 			row.Ratio, row.Source = overrideByGroup[name], "customer"
 		case defaultByGroup[name] != "":
 			row.Ratio, row.Source = defaultByGroup[name], "reseller_default"
+		case customerUserId > 0:
+			// An owned customer with no price of its own starts at the neutral
+			// ratio 1. PlatformRatio stays visible for reference.
+			row.Ratio, row.Source = strconv.FormatFloat(ResellerDefaultCustomerRatio, 'f', -1, 64), "default"
 		case row.PlatformRatio != "":
 			row.Ratio, row.Source = row.PlatformRatio, "platform"
 		default:

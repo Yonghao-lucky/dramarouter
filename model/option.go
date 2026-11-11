@@ -396,9 +396,21 @@ func UpdateOption(key string, value string) error {
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
 	DB.Save(&option)
+	// Capture the outgoing group ratios before the in-memory map is replaced, so
+	// a platform price edit can pin each reseller's existing cost instead of
+	// silently moving it to the new retail ratio.
+	var previousGroupRatio map[string]float64
+	if key == "GroupRatio" {
+		previousGroupRatio = ratio_setting.GetGroupRatioCopy()
+	}
 	// Update OptionMap
 	if err := updateOptionMap(key, value); err != nil {
 		return err
+	}
+	if previousGroupRatio != nil {
+		if err := FreezeResellerGroupCostsOnRatioChange(previousGroupRatio); err != nil {
+			common.SysError("failed to freeze reseller group costs: " + err.Error())
+		}
 	}
 	refreshPricingAfterOptionChange([]string{key})
 	publishOptionChange([]string{key})
@@ -460,12 +472,21 @@ func UpdateOptionsBulk(values map[string]string) error {
 			handleConfigUpdate(key, value)
 		}
 	}
+	var previousGroupRatio map[string]float64
+	if _, ok := values["GroupRatio"]; ok {
+		previousGroupRatio = ratio_setting.GetGroupRatioCopy()
+	}
 	for k, v := range values {
 		if strings.HasPrefix(k, "sms.") {
 			continue
 		}
 		if err := updateOptionMap(k, v); err != nil {
 			return err
+		}
+	}
+	if previousGroupRatio != nil {
+		if err := FreezeResellerGroupCostsOnRatioChange(previousGroupRatio); err != nil {
+			common.SysError("failed to freeze reseller group costs: " + err.Error())
 		}
 	}
 	keys := make([]string, 0, len(values))

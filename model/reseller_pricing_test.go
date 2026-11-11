@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,14 +53,28 @@ func TestResolveResellerPricingLayering(t *testing.T) {
 	assert.Equal(t, 1.5, specific.Retail)
 	assert.Equal(t, 0.8, specific.CostRatio, "cost ratio still comes from the reseller profile")
 
-	// A group without a reseller retail price still resolves the reseller's cost
-	// for it, because the customer is an ordinary account that may call that
-	// group and the spread is the reseller's margin.
+	// A group the reseller never priced falls back to the neutral ratio 1. The
+	// platform group ratio here is the reseller's own wholesale baseline, so
+	// inheriting it would leave the reseller zero margin on that group.
 	unpriced, err := ResolveResellerPricing(customerID, "default")
 	require.NoError(t, err)
-	assert.False(t, unpriced.Override, "no retail price must leave the platform ratio in charge")
+	assert.True(t, unpriced.Override)
+	assert.Equal(t, "default", unpriced.Source)
+	assert.Equal(t, ResellerDefaultCustomerRatio, unpriced.Retail)
 	assert.Equal(t, resellerID, unpriced.OwnerID)
 	assert.Greater(t, unpriced.CostRatio, 0.0, "the platform group ratio is the fallback cost")
+
+	// The neutral default never rewrites a stored customer price.
+	stored, err := ListCustomerGroupPrices(customerID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "1.5", stored[0].Ratio)
+
+	// Platform-direct customers keep the platform ratio chain untouched.
+	directUnpriced, err := ResolveResellerPricing(9103, "default")
+	require.NoError(t, err)
+	assert.False(t, directUnpriced.Override, "a platform customer must not be repriced by a reseller default")
+	assert.Zero(t, directUnpriced.OwnerID)
 }
 
 // TestResellerPlatformGroupsListsEveryPlatformGroup pins the contract that a
@@ -102,12 +117,12 @@ func TestResellerPlatformGroupsListsEveryPlatformGroup(t *testing.T) {
 	require.True(t, ok, "a platform group outside the price book must still be listed")
 	assert.True(t, platform.Sellable, "a platform group has a platform cost, so it is sellable")
 	assert.NotEmpty(t, platform.CostRatio)
-	// The standing customer price is the platform's own group price, never the
-	// reseller's wholesale cost: prefilling the cost would show the customer the
-	// reseller's purchase price and leave the reseller no spread to sell on.
-	assert.Equal(t, "platform", platform.Source)
-	assert.NotEmpty(t, platform.PlatformRatio, "the platform ratio is the standing customer price")
-	assert.Equal(t, platform.PlatformRatio, platform.Ratio)
+	// An owned customer with no price of its own starts at the neutral ratio 1:
+	// neither the platform group price nor the reseller's wholesale cost, both
+	// of which would leave the reseller nothing to sell on.
+	assert.Equal(t, "default", platform.Source)
+	assert.Equal(t, "1", platform.Ratio)
+	assert.NotEmpty(t, platform.PlatformRatio, "the platform ratio stays visible for reference")
 }
 
 func TestResellerMarginQuotaArithmetic(t *testing.T) {
@@ -323,4 +338,49 @@ func TestResellerTransferEventKeyCannotCrossTenants(t *testing.T) {
 	quotaB, err := GetUserQuota(resellerB, true)
 	require.NoError(t, err)
 	assert.Equal(t, 10000, quotaB, "the refused replay moves no money")
+}
+
+// TestFreezeResellerGroupCostsOnRatioChange pins the rule that editing a
+// platform group ratio must not silently move a reseller's wholesale cost, and
+// that a cost already agreed with a reseller is never overwritten by a later
+// price edit.
+func TestFreezeResellerGroupCostsOnRatioChange(t *testing.T) {
+	truncateTables(t)
+
+	const (
+		inheritingID = 9401
+		negotiatedID = 9402
+	)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: inheritingID, Name: "inheriting", Status: ResellerStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&ResellerProfile{UserId: negotiatedID, Name: "negotiated", Status: ResellerStatusEnabled}).Error)
+	// One reseller has no explicit cost row and inherits the platform ratio; the
+	// other has a negotiated cost for the same group that must survive.
+	require.NoError(t, DB.Create(&ResellerGroupCost{
+		ResellerId: negotiatedID, GroupName: "frozen-group", CostRatio: "0.31", Enabled: true,
+	}).Error)
+
+	previous := map[string]float64{"frozen-group": 0.36}
+	require.NoError(t, FreezeResellerGroupCostsOnRatioChange(previous))
+
+	var inherited ResellerGroupCost
+	require.NoError(t, DB.Where("reseller_id = ? AND group_name = ?", inheritingID, "frozen-group").First(&inherited).Error)
+	assert.Equal(t, "0.36", inherited.CostRatio, "the pre-edit ratio is pinned for a reseller that inherited it")
+	assert.True(t, inherited.Enabled)
+
+	var negotiated ResellerGroupCost
+	require.NoError(t, DB.Where("reseller_id = ? AND group_name = ?", negotiatedID, "frozen-group").First(&negotiated).Error)
+	assert.Equal(t, "0.31", negotiated.CostRatio, "a negotiated cost is never replaced by a price-edit snapshot")
+
+	// A group still at its previous ratio needs no pin, so an unrelated save
+	// does not litter the price book with cost rows.
+	current := ratio_setting.GetGroupRatioCopy()
+	unchanged := map[string]float64{}
+	for group, ratio := range current {
+		unchanged[group] = ratio
+	}
+	require.NotEmpty(t, unchanged, "the platform must serve at least one group")
+	require.NoError(t, FreezeResellerGroupCostsOnRatioChange(unchanged))
+	var count int64
+	require.NoError(t, DB.Model(&ResellerGroupCost{}).Where("reseller_id = ?", inheritingID).Count(&count).Error)
+	assert.EqualValues(t, 1, count, "an unchanged ratio must not pin anything new")
 }

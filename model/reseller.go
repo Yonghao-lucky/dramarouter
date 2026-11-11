@@ -343,7 +343,11 @@ func transferResellerQuotaTx(database *gorm.DB, req ResellerTransferRequest) (*R
 	if resellerUserId <= 0 || customerUserId <= 0 || retailQuota <= 0 || eventKey == "" {
 		return nil, ErrResellerTransferInvalid
 	}
-	if retailQuota > int64(common.MaxQuota) {
+	// A transfer moves wallet balance, so it shares the JavaScript-safe wallet
+	// boundary rather than the per-request int32 charge boundary. The int32 cap
+	// silently rejected any single transfer above ~$4,295 at the default
+	// quota-per-unit as "invalid transfer amount".
+	if retailQuota > int64(common.MaxWalletQuota) {
 		return nil, ErrResellerTransferInvalid
 	}
 	fundingKind := NormalizeResellerFundingKind(req.Kind)

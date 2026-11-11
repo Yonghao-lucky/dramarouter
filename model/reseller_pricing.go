@@ -27,6 +27,10 @@ var (
 // additive: when Override is false the caller keeps the existing group-ratio
 // result untouched. CostRatio is the reseller's wholesale price for the group;
 // it is not charged per request any more, it prices wallet transfers.
+// ResellerDefaultCustomerRatio is the neutral retail ratio an owned customer
+// pays in a group its reseller has not priced yet.
+const ResellerDefaultCustomerRatio = 1.0
+
 type ResellerPricing struct {
 	OwnerID   int
 	Retail    float64
@@ -146,7 +150,15 @@ func loadResellerPricing(userID int, usingGroup string) (ResellerPricing, error)
 		}
 		result.CostRatio = cost
 
+		// An owned customer with no price of its own starts at the neutral
+		// ratio 1. The platform group ratio is the reseller's own wholesale
+		// baseline here, so inheriting it would leave the reseller no margin on
+		// every group it has not priced explicitly. A reseller default price, and
+		// above all an existing customer price, still win over this default.
 		if !result.Override {
+			result.Retail, result.Override, result.Source = ResellerDefaultCustomerRatio, true, "default"
+		}
+		if result.Source == "default" {
 			var defaultPrice ResellerDefaultPrice
 			err := DB.Where("reseller_id = ? AND group_name = ?", ownerID, usingGroup).First(&defaultPrice).Error
 			if err == nil {

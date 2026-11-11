@@ -84,6 +84,64 @@ func SetResellerGroupCost(resellerId int, group, ratio string, enabled bool, act
 	return InvalidateResellerDefaultPricingCache()
 }
 
+// FreezeResellerGroupCostsOnRatioChange pins every reseller's wholesale cost at
+// the ratio it was being charged before the platform edited a group ratio.
+//
+// A reseller without an explicit cost row inherits the live platform group
+// ratio, so an administrator editing GroupRatio would silently move that
+// reseller's cost too. Margin belongs to the reseller: a platform price change
+// must not decide it, because the platform's cost of serving the group did not
+// necessarily move with the retail price. Capturing the previous ratio as an
+// explicit row keeps every existing reseller on the cost it already had; a new
+// cost is then a deliberate per-reseller decision.
+//
+// Only groups whose ratio actually changed are pinned, and an existing explicit
+// row always wins, so repeated saves never overwrite a negotiated cost.
+func FreezeResellerGroupCostsOnRatioChange(previous map[string]float64) error {
+	if DB == nil || len(previous) == 0 {
+		return nil
+	}
+	current := ratio_setting.GetGroupRatioCopy()
+	pinned := make(map[string]string, len(previous))
+	for group, old := range previous {
+		if old <= 0 {
+			continue
+		}
+		if next, ok := current[group]; ok && next == old {
+			continue
+		}
+		pinned[group] = strconv.FormatFloat(old, 'f', -1, 64)
+	}
+	if len(pinned) == 0 {
+		return nil
+	}
+	resellerIds := make([]int, 0, 16)
+	if err := DB.Model(&ResellerProfile{}).Where("user_id > 0").Pluck("user_id", &resellerIds).Error; err != nil {
+		return err
+	}
+	if len(resellerIds) == 0 {
+		return nil
+	}
+	now := common.GetTimestamp()
+	rows := make([]ResellerGroupCost, 0, len(resellerIds)*len(pinned))
+	for _, resellerId := range resellerIds {
+		for group, ratio := range pinned {
+			rows = append(rows, ResellerGroupCost{
+				ResellerId: resellerId, GroupName: group, CostRatio: ratio, Enabled: true, UpdatedAt: now,
+			})
+		}
+	}
+	// DoNothing keeps explicit rows: a cost already agreed with a reseller must
+	// not be replaced by a snapshot taken during an unrelated price edit.
+	if err := DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "reseller_id"}, {Name: "group_name"}},
+		DoNothing: true,
+	}).CreateInBatches(&rows, 200).Error; err != nil {
+		return err
+	}
+	return InvalidateResellerDefaultPricingCache()
+}
+
 // resellerCostRatio returns the wholesale ratio for one group. An enabled
 // ResellerGroupCost row wins; otherwise the group falls back to the platform
 // group ratio, which is the platform's own cost for that traffic. A group the
