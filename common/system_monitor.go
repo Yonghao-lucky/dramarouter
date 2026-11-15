@@ -61,9 +61,16 @@ func updateSystemStatus() {
 	}
 
 	// Memory
+	// 用 MemAvailable 计算真实使用率。mem.VirtualMemory().UsedPercent 在容器内读取的是
+	// 宿主机 /proc/meminfo（cgroup 不隔离），且把 Slab/SReclaimable 等可回收内存计入已用，
+	// 会在宿主机其他负载波动时虚高，导致 relay 请求被误判为内存超载而全部 503。
 	memInfo, err := mem.VirtualMemory()
 	if err == nil {
-		status.MemoryUsage = memInfo.UsedPercent
+		if memInfo.Total > 0 && memInfo.Available > 0 {
+			status.MemoryUsage = float64(memInfo.Total-memInfo.Available) / float64(memInfo.Total) * 100.0
+		} else {
+			status.MemoryUsage = memInfo.UsedPercent
+		}
 	}
 
 	// Disk
