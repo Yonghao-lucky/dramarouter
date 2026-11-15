@@ -163,6 +163,30 @@ func ClaudeMessagesRequestToOpenAIChat(claudeRequest dto.ClaudeRequest, info con
 						ImageUrl: &dto.MessageImageUrl{Url: imageData},
 					}
 					mediaMessages = append(mediaMessages, mediaMessage)
+				case "search_result":
+					// Anthropic search_result blocks carry a title, a bare URL
+					// source and plain-text content. Chat-completions upstreams
+					// have no equivalent block type, so fold it into text.
+					text := mediaMsg.GetText()
+					if text == "" {
+						text = mediaMsg.GetStringContent()
+					}
+					var header []string
+					if mediaMsg.Title != "" {
+						header = append(header, "Title: "+mediaMsg.Title)
+					}
+					if mediaMsg.Source != nil && mediaMsg.Source.Url != "" {
+						header = append(header, "Source: "+mediaMsg.Source.Url)
+					}
+					if len(header) > 0 {
+						text = strings.Join(header, "\n") + "\n\n" + text
+					}
+					if text != "" {
+						mediaMessages = append(mediaMessages, dto.MediaContent{
+							Type: "text",
+							Text: text,
+						})
+					}
 				case "tool_use":
 					toolCall := dto.ToolCallRequest{
 						ID:   mediaMsg.Id,

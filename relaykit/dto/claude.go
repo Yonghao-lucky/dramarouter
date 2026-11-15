@@ -27,6 +27,8 @@ type ClaudeMediaMessage struct {
 	Signature    string               `json:"signature,omitempty"`
 	Delta        string               `json:"delta,omitempty"`
 	CacheControl json.RawMessage      `json:"cache_control,omitempty"`
+	// search_result block header; folded into text by the chat converter.
+	Title string `json:"title,omitempty"`
 	// tool_calls
 	Id        string `json:"id,omitempty"`
 	Name      string `json:"name,omitempty"`
@@ -112,10 +114,31 @@ func (m *ClaudeMediaMessage) ToFileSource() types.FileSource {
 }
 
 type ClaudeMessageSource struct {
-	Type      string `json:"type"`
+	Type      string `json:"type,omitempty"`
 	MediaType string `json:"media_type,omitempty"`
 	Data      any    `json:"data,omitempty"`
 	Url       string `json:"url,omitempty"`
+}
+
+// UnmarshalJSON accepts both Anthropic source shapes:
+//   - object form used by image/document blocks: {"type":"base64","media_type":...,"data":...}
+//   - bare URL string used by search_result blocks: "https://example.com/page"
+//
+// Without this, a search_result block makes the whole content array fail to
+// decode, which used to surface as a 500 on an otherwise valid request.
+func (s *ClaudeMessageSource) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err == nil {
+		*s = ClaudeMessageSource{Type: "url", Url: raw}
+		return nil
+	}
+	type sourceAlias ClaudeMessageSource
+	var alias sourceAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*s = ClaudeMessageSource(alias)
+	return nil
 }
 
 type ClaudeMessage struct {
