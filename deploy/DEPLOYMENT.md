@@ -91,8 +91,18 @@ Docker 网桥 `192.168.240.1/20`，因此 `TRUSTED_PROXIES` 必须是 `127.0.0.1
 ② 构建（构建上下文是仓库根目录）
    docker build -t dramarouter:<提交sha> -t dramarouter:next .
 
+   Dockerfile 默认 GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct。
+   本机实测 goproxy.cn 约 2 MB/s，proxy.golang.org 约 100 KB/s；如需走别的源：
+   docker build --build-arg GOPROXY=https://proxy.golang.org,direct -t dramarouter:next .
+
 ③ 滚动更新（脚本会自动打 latest 标签并保留 prev 回滚点）
    /opt/dramarouter-secrets/rollout.sh --site us dramarouter:next
+```
+
+② + ③ 也可一步完成（从当前仓库 HEAD 构建并发布，`GOPROXY` 可用同名环境变量覆盖）：
+
+```text
+/opt/dramarouter-secrets/rollout.sh --site us --build
 ```
 
 更新 open 站（realmrouter.com）时把镜像和站点一起换，生产站不受影响：
@@ -108,6 +118,23 @@ docker build -t dramarouter-open:next .
 | --- | --- | --- | --- | --- | --- |
 | `us`（默认） | realmdrama.com | dramarouter-us-a/-b | 14010/14011 | `00-dramarouter-us-upstream.conf` | `dramarouter:latest` |
 | `open` | realmrouter.com | dramarouter-open-a/-b | 14110/14111 | `00-dramarouter-open-upstream.conf` | `dramarouter-open:latest` |
+
+### 45.113.202.31 上的 open 站（2026-11-16 起）
+
+这台机器上的 open 站由 1Panel openresty（`1Panel-openresty-mAxM`，host 网络）对外监听 `0.0.0.0:14110`，再转发给两台后端：
+
+| 用途 | 容器 | 端口 |
+| --- | --- | --- |
+| 应用 a（master） | `dramarouter-open-a` | `127.0.0.1:14112` → 容器 3000 |
+| 应用 b（slave） | `dramarouter-open-b` | `127.0.0.1:14111` → 容器 3000 |
+
+| 配置 | 路径 |
+| --- | --- |
+| 编排文件 / 变量 | `/opt/1panel/docker/compose/dramarouter-open/compose.yml`、同目录 `.env`（600，不入库） |
+| upstream | `/opt/1panel/www/conf.d/00-dramarouter-open-upstream.conf`（`rollout.sh` 会改写） |
+| 14110 入口 | `/opt/1panel/www/conf.d/dramarouter-open-14110.conf` |
+
+`rollout.sh` 会按运行中容器的实际端口映射和本机 `1Panel-openresty-*` 容器名自动适配，更新命令不变：`deploy/scripts/rollout.sh --site open dramarouter-open:next`。compose 只声明 app-a / app-b，pg、redis 属同一项目但不在文件里，不要对该项目执行 `down` 或 `--remove-orphans`。
 
 **不带 `--site` 时默认为 `us`**，与旧调用方式兼容。滚动前脚本会确认目标 upstream 与 compose 文件存在，写错站点名会直接退出而不是改到另一套配置。
 

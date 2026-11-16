@@ -12,7 +12,9 @@ ENV GO111MODULE=on CGO_ENABLED=0 GOWORK=off
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG GOPROXY=https://proxy.golang.org,direct
+# 默认走 goproxy.cn：本机实测比 proxy.golang.org 快约 20 倍（2 MB/s vs 100 KB/s）。
+# 逗号表示遇 404/410 才切下一个源，可用 --build-arg GOPROXY=... 覆盖。
+ARG GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
 ENV GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64}
 ENV GOPROXY=${GOPROXY}
 ENV GOEXPERIMENT=greenteagc

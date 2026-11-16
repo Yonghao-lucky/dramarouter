@@ -16,17 +16,20 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-用法: rollout.sh [--site us|open] [镜像名]
+用法: rollout.sh [--site us|open] [--build] [镜像名]
 
   --site us    生产站 realmdrama.com（容器 dramarouter-us-a/-b，端口 14010/14011）
   --site open  open 站 realmrouter.com（容器 dramarouter-open-a/-b，端口 14110/14111）
+  --build      先用当前仓库 HEAD 构建镜像，再滚动更新（相当于手册的 ② + ③）
 
 镜像名省略时使用该站点的默认 latest 标签。
+本机没有 openresty 与 upstream 文件时自动退化为逐台重建：不摘流，但要求另一台健康才动当前这台。
 EOF
 }
 
 SITE=us
 IMG=""
+BUILD=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --site)
@@ -36,6 +39,10 @@ while [ $# -gt 0 ]; do
       ;;
     --site=*)
       SITE="${1#--site=}"
+      shift
+      ;;
+    --build)
+      BUILD=1
       shift
       ;;
     -h|--help)
@@ -81,8 +88,25 @@ case "$SITE" in
 esac
 
 IMG="${IMG:-$DEFAULT_IMG}"
-CTR=1Panel-openresty-RqEz
+
+# 端口以运行中容器的实际映射为准：不同机器的部署端口可能不同
+# （如 45.113.202.31 上 14110 由 openresty 对外监听，app-a 改在 127.0.0.1:14112）。
+for i in 0 1; do
+  mapped=$(docker port "${CONTAINERS[$i]}" 3000/tcp 2>/dev/null | head -n1 | sed 's/.*://')
+  if [ -n "$mapped" ]; then PORTS[$i]="$mapped"; fi
+done
+
+# 1Panel 的 openresty 容器名带随机后缀，各机器不同；可用 OPENRESTY_CTR 显式指定。
+CTR="${OPENRESTY_CTR:-$(docker ps --format '{{.Names}}' | grep -m1 '^1Panel-openresty-' || true)}"
+CTR="${CTR:-1Panel-openresty-RqEz}"
 DRAIN_SECONDS="${DRAIN_SECONDS:-10}"
+
+# 本机（无 1Panel/openresty 的测试机）没有 upstream 文件，也没有摘流容器。
+# 这种情况下退化为「逐个重建」：不能摘流，只能靠预检保证另一台健康时才动一台。
+NGINX_MODE=1
+if [ ! -f "$UP" ] || ! docker inspect "$CTR" >/dev/null 2>&1; then
+  NGINX_MODE=0
+fi
 STOP_ARGS=()
 if [ -n "${STOP_TIMEOUT:-}" ]; then STOP_ARGS=(-t "$STOP_TIMEOUT"); fi
 
@@ -94,8 +118,11 @@ ROLLED=()
 PREV_IMAGE=""
 
 # 两个站点共用同一个 openresty 容器；任何一处配置写错都会让另一个站点受影响，
-# 所以先确认目标文件确实存在，避免 cat > 到一个陌生路径。
-[ -f "$UP" ] || { echo "upstream 配置不存在: $UP" >&2; exit 1; }
+# 所以有 nginx 模式时先确认目标文件确实存在，避免 cat > 到一个陌生路径。
+# 无 nginx 模式（本机测试机）没有 upstream 文件，跳过该检查。
+if [ "$NGINX_MODE" -eq 1 ]; then
+  [ -f "$UP" ] || { echo "upstream 配置不存在: $UP" >&2; exit 1; }
+fi
 [ -f "$PROJ/compose.yml" ] || { echo "compose 文件不存在: $PROJ/compose.yml" >&2; exit 1; }
 
 docker image inspect "$IMG" >/dev/null 2>&1 || { echo "镜像不存在: $IMG"; exit 1; }
@@ -130,6 +157,8 @@ healthy_ports() {  # 输出当前真能响应 /api/status 的端口，逗号分�
 }
 
 set_upstream() {  # $1 = 逗号分隔的保持服务端口；留空 = 双后端都挂载
+  # 无 nginx 模式：没有 upstream 可改，直接返回成功。
+  if [ "$NGINX_MODE" -eq 0 ]; then return 0; fi
   local keep="${1:-}" a b p0 p1 backup
   p0="${PORTS[0]}"
   p1="${PORTS[1]}"
@@ -181,9 +210,18 @@ idx_of() {  # $1 = 服务名
 roll_one() {  # $1 = 服务下标
   local i="$1" svc="${SERVICES[$1]}" port="${PORTS[$1]}" peer
   peer="${PORTS[$(( (i + 1) % 2 ))]}"
-  echo "=== 更新 $svc ($port)，流量只留在 $peer ==="
-  set_upstream "$peer"
-  sleep "$DRAIN_SECONDS"
+  if [ "$NGINX_MODE" -eq 1 ]; then
+    echo "=== 更新 $svc ($port)，流量只留在 $peer ==="
+    set_upstream "$peer"
+    sleep "$DRAIN_SECONDS"
+  else
+    # 无摘流能力：不动 upstream，直接重建这一台，另一台继续对外服务
+    if ! curl -sf -o /dev/null --max-time 3 "http://127.0.0.1:$peer/api/status"; then
+      echo "!!! $peer 不健康，拒绝在无摘流模式下重建 $svc" >&2
+      return 1
+    fi
+    echo "=== 更新 $svc ($port)，$peer 保持在线 ==="
+  fi
   ROLLED+=("$svc")
   ( cd "$PROJ" && docker compose stop "${STOP_ARGS[@]}" "$svc" && docker compose up -d --no-deps --force-recreate "$svc" )
   wait_healthy "$port"
@@ -241,6 +279,17 @@ rollback() {
 }
 
 preflight
+
+if [ "$BUILD" -eq 1 ]; then
+  REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+  SHA=$(git -C "$REPO_ROOT" rev-parse --short HEAD)
+  BASE_IMG="${DEFAULT_IMG%:latest}"
+  echo "=== 构建 $BASE_IMG:$SHA（仓库 $REPO_ROOT）"
+  # 默认走 goproxy.cn：proxy.golang.org 在本机只有约 100 KB/s，差 20 倍。
+  docker build --build-arg "GOPROXY=${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}" \
+    -t "$BASE_IMG:$SHA" -t "$BASE_IMG:next" "$REPO_ROOT"
+  IMG="$BASE_IMG:next"
+fi
 
 if [ "$IMG" != "$DEFAULT_IMG" ]; then
   # 保留上一版用于回滚（PREV_IMAGE 已在启动时从运行中的容器读取），再打 latest 标签
