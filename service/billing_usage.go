@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -16,6 +18,47 @@ const (
 	usageBillingPathGemini             = "billing-usage-gemini"
 	usageBillingPathGeminiEstimated    = "billing-usage-gemini-estimated"
 )
+
+// MoonshotCacheWrite1hHeader carries the 1h-TTL share of a Moonshot-compatible
+// upstream's cache writes. OpenAI-format bodies only report the cache-write
+// total (prompt_tokens_details.cache_write_tokens), so the TTL split for chat
+// completions is only available from this response header.
+const MoonshotCacheWrite1hHeader = "Msh-Usage-Cache-Write-Tokens-1h"
+
+// ApplyCacheWriteTTLSplitFromHeader splits an OpenAI-format cache-write total
+// into 5m/1h buckets using the upstream Msh-Usage-Cache-Write-Tokens-1h header
+// so 1h writes are billed at the 1h cache-creation price. The header value is
+// upstream-controlled, so it is bounded by the body's cache-write total.
+// Usage that already carries a TTL split or a non-OpenAI semantic is left
+// untouched.
+func ApplyCacheWriteTTLSplitFromHeader(header http.Header, usage *dto.Usage) {
+	if usage == nil || header == nil {
+		return
+	}
+	oneHourTokens, err := strconv.Atoi(strings.TrimSpace(header.Get(MoonshotCacheWrite1hHeader)))
+	if err != nil || oneHourTokens <= 0 {
+		return
+	}
+	targets := []*dto.Usage{usage}
+	if usage.BillingUsage != nil && usage.BillingUsage.OpenAIUsage != nil {
+		targets = append(targets, usage.BillingUsage.OpenAIUsage)
+	}
+	for _, target := range targets {
+		if target.UsageSemantic != "" && target.UsageSemantic != dto.BillingUsageSemanticOpenAI {
+			continue
+		}
+		if target.ClaudeCacheCreation5mTokens > 0 || target.ClaudeCacheCreation1hTokens > 0 {
+			continue
+		}
+		total := target.PromptTokensDetails.CacheCreationTokensTotal()
+		if total <= 0 {
+			continue
+		}
+		target.ClaudeCacheCreation1hTokens = min(oneHourTokens, total)
+		target.ClaudeCacheCreation5mTokens = total - target.ClaudeCacheCreation1hTokens
+		target.UsageSemantic = dto.BillingUsageSemanticOpenAI
+	}
+}
 
 func effectiveBillingUsage(usage *dto.Usage) *dto.Usage {
 	if billingUsage, ok := usageFromBillingUsage(usage); ok {

@@ -325,7 +325,12 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		if !dCachedCreationTokens.IsZero() || hasSplitCacheCreationTokens {
 			if !summary.IsClaudeUsageSemantic && !legacyClaudeDerived {
 				baseTokens = baseTokens.Sub(dCachedCreationTokens)
-				cachedCreationTokensWithRatio = dCachedCreationTokens.Mul(dCacheCreationRatio)
+				// The 1h share comes from the upstream TTL header and is bounded
+				// by the cache-write total; the remainder is priced as 5m writes.
+				oneHourTokens := min(summary.CacheCreationTokens1h, summary.CacheCreationTokens)
+				dOneHourTokens := decimal.NewFromInt(int64(max(oneHourTokens, 0)))
+				cachedCreationTokensWithRatio = dCachedCreationTokens.Sub(dOneHourTokens).Mul(dCacheCreationRatio).
+					Add(dOneHourTokens.Mul(dCacheCreationRatio1h))
 			} else {
 				remaining := summary.CacheCreationTokens - summary.CacheCreationTokens5m - summary.CacheCreationTokens1h
 				if remaining < 0 {

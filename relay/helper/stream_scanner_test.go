@@ -828,3 +828,22 @@ func TestWaitForStreamEnd_ReadFailurePrecedesLaterClientCancel(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamScannerHandler_ForwardsUpstreamUsageHeaders(t *testing.T) {
+	t.Parallel()
+
+	c, resp, info := setupStreamTest(t, strings.NewReader("data: {}\ndata: [DONE]\n"))
+	resp.Header = http.Header{}
+	resp.Header.Set("Msh-Usage-Cache-Write-Tokens-5m", "1024")
+	resp.Header.Set("Msh-Usage-Cache-Write-Tokens-1h", "0")
+	resp.Header.Set("X-Codex-Turn-State", "turn-1")
+	resp.Header.Set("Server", "Caddy")
+
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
+
+	headers := c.Writer.Header()
+	assert.Equal(t, "1024", headers.Get("Msh-Usage-Cache-Write-Tokens-5m"))
+	assert.Equal(t, "0", headers.Get("Msh-Usage-Cache-Write-Tokens-1h"))
+	assert.Equal(t, "turn-1", headers.Get("X-Codex-Turn-State"))
+	assert.Empty(t, headers.Get("Server"))
+}

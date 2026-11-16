@@ -265,3 +265,18 @@ func TestGeneralOpenAIRequestPreserveMessageLevelTools(t *testing.T) {
 	assert.Contains(t, meta.CombineText, "Get the current time of a city")
 	assert.Contains(t, meta.CombineText, "lookup_order")
 }
+
+// Moonshot-compatible upstreams select the prompt-cache TTL from the
+// request-level cache_control; dropping it silently downgrades 1h writes to 5m.
+func TestGeneralOpenAIRequestPreservesTopLevelCacheControl(t *testing.T) {
+	raw := []byte(`{"model":"kimi-k3.1-pro","cache_control":{"type":"ephemeral","ttl":"1h"},"messages":[{"role":"user","content":"hi"}]}`)
+
+	var req GeneralOpenAIRequest
+	require.NoError(t, kitutil.Unmarshal(raw, &req))
+
+	encoded, err := kitutil.Marshal(req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ephemeral", gjson.GetBytes(encoded, "cache_control.type").String())
+	assert.Equal(t, "1h", gjson.GetBytes(encoded, "cache_control.ttl").String())
+}

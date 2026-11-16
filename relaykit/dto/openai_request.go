@@ -74,9 +74,12 @@ type GeneralOpenAIRequest struct {
 	// Used by OpenAI to cache responses for similar requests to optimize your cache hit rates. Replaces the user field
 	PromptCacheKey       string          `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
-	LogitBias            json.RawMessage `json:"logit_bias,omitempty"`
-	Metadata             json.RawMessage `json:"metadata,omitempty"`
-	Prediction           json.RawMessage `json:"prediction,omitempty"`
+	// Request-level cache_control (e.g. {"type":"ephemeral","ttl":"1h"}) used by
+	// Moonshot-compatible upstreams to select the prompt-cache TTL.
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+	LogitBias    json.RawMessage `json:"logit_bias,omitempty"`
+	Metadata     json.RawMessage `json:"metadata,omitempty"`
+	Prediction   json.RawMessage `json:"prediction,omitempty"`
 	// gemini
 	ExtraBody json.RawMessage `json:"extra_body,omitempty"`
 	//xai
