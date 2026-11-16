@@ -74,6 +74,8 @@ type GeneralOpenAIRequest struct {
 	// Used by OpenAI to cache responses for similar requests to optimize your cache hit rates. Replaces the user field
 	PromptCacheKey       string          `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
+	// Kimi's official cache-write control, e.g. {"mode":"implicit","ttl":"1h"}.
+	PromptCacheOptions json.RawMessage `json:"prompt_cache_options,omitempty"`
 	// Request-level cache_control (e.g. {"type":"ephemeral","ttl":"1h"}) used by
 	// Moonshot-compatible upstreams to select the prompt-cache TTL.
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
