@@ -280,3 +280,16 @@ func TestGeneralOpenAIRequestPreservesTopLevelCacheControl(t *testing.T) {
 	assert.Equal(t, "ephemeral", gjson.GetBytes(encoded, "cache_control.type").String())
 	assert.Equal(t, "1h", gjson.GetBytes(encoded, "cache_control.ttl").String())
 }
+
+func TestOpenAIResponsesRequestPreservesTopLevelCacheControl(t *testing.T) {
+	raw := []byte(`{"model":"kimi-k3.1-pro","cache_control":{"type":"ephemeral","ttl":"1h"},"input":"hi"}`)
+
+	var req OpenAIResponsesRequest
+	require.NoError(t, kitutil.Unmarshal(raw, &req))
+
+	encoded, err := kitutil.Marshal(req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ephemeral", gjson.GetBytes(encoded, "cache_control.type").String())
+	assert.Equal(t, "1h", gjson.GetBytes(encoded, "cache_control.ttl").String())
+}
