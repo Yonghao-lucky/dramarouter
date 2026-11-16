@@ -19,24 +19,33 @@ const (
 	usageBillingPathGeminiEstimated    = "billing-usage-gemini-estimated"
 )
 
-// MoonshotCacheWrite1hHeader carries the 1h-TTL share of a Moonshot-compatible
-// upstream's cache writes. OpenAI-format bodies only report the cache-write
-// total (prompt_tokens_details.cache_write_tokens), so the TTL split for chat
-// completions is only available from this response header.
-const MoonshotCacheWrite1hHeader = "Msh-Usage-Cache-Write-Tokens-1h"
+// Moonshot-compatible upstreams report the per-TTL cache-write counts only in
+// these response headers; OpenAI-format bodies carry just the total
+// (prompt_tokens_details.cache_write_tokens).
+const (
+	MoonshotCacheWrite5mHeader = "Msh-Usage-Cache-Write-Tokens-5m"
+	MoonshotCacheWrite1hHeader = "Msh-Usage-Cache-Write-Tokens-1h"
+)
 
-// ApplyCacheWriteTTLSplitFromHeader splits an OpenAI-format cache-write total
-// into 5m/1h buckets using the upstream Msh-Usage-Cache-Write-Tokens-1h header
-// so 1h writes are billed at the 1h cache-creation price. The header value is
-// upstream-controlled, so it is bounded by the body's cache-write total.
-// Usage that already carries a TTL split or a non-OpenAI semantic is left
-// untouched.
+// ApplyCacheWriteTTLSplitFromHeader records the upstream's 5m/1h cache-write
+// counts from the Msh-Usage-Cache-Write-Tokens-5m/1h response headers so each
+// bucket is billed at its own cache-creation price, exactly as the upstream
+// reports it. The headers are upstream-controlled, so their sum is bounded by
+// the body's cache-write total. Usage that already carries a TTL split or a
+// non-OpenAI semantic is left untouched.
 func ApplyCacheWriteTTLSplitFromHeader(header http.Header, usage *dto.Usage) {
 	if usage == nil || header == nil {
 		return
 	}
-	oneHourTokens, err := strconv.Atoi(strings.TrimSpace(header.Get(MoonshotCacheWrite1hHeader)))
-	if err != nil || oneHourTokens <= 0 {
+	fiveMinuteTokens, err5m := strconv.Atoi(strings.TrimSpace(header.Get(MoonshotCacheWrite5mHeader)))
+	oneHourTokens, err1h := strconv.Atoi(strings.TrimSpace(header.Get(MoonshotCacheWrite1hHeader)))
+	if err5m != nil || fiveMinuteTokens < 0 {
+		fiveMinuteTokens = 0
+	}
+	if err1h != nil || oneHourTokens < 0 {
+		oneHourTokens = 0
+	}
+	if fiveMinuteTokens == 0 && oneHourTokens == 0 {
 		return
 	}
 	targets := []*dto.Usage{usage}
@@ -55,7 +64,7 @@ func ApplyCacheWriteTTLSplitFromHeader(header http.Header, usage *dto.Usage) {
 			continue
 		}
 		target.ClaudeCacheCreation1hTokens = min(oneHourTokens, total)
-		target.ClaudeCacheCreation5mTokens = total - target.ClaudeCacheCreation1hTokens
+		target.ClaudeCacheCreation5mTokens = min(fiveMinuteTokens, total-target.ClaudeCacheCreation1hTokens)
 		target.UsageSemantic = dto.BillingUsageSemanticOpenAI
 	}
 }

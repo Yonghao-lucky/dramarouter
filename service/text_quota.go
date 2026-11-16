@@ -324,22 +324,19 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		hasSplitCacheCreationTokens := summary.CacheCreationTokens5m > 0 || summary.CacheCreationTokens1h > 0
 		if !dCachedCreationTokens.IsZero() || hasSplitCacheCreationTokens {
 			if !summary.IsClaudeUsageSemantic && !legacyClaudeDerived {
+				// OpenAI prompt_tokens includes cache writes; price them separately.
 				baseTokens = baseTokens.Sub(dCachedCreationTokens)
-				// The 1h share comes from the upstream TTL header and is bounded
-				// by the cache-write total; the remainder is priced as 5m writes.
-				oneHourTokens := min(summary.CacheCreationTokens1h, summary.CacheCreationTokens)
-				dOneHourTokens := decimal.NewFromInt(int64(max(oneHourTokens, 0)))
-				cachedCreationTokensWithRatio = dCachedCreationTokens.Sub(dOneHourTokens).Mul(dCacheCreationRatio).
-					Add(dOneHourTokens.Mul(dCacheCreationRatio1h))
-			} else {
-				remaining := summary.CacheCreationTokens - summary.CacheCreationTokens5m - summary.CacheCreationTokens1h
-				if remaining < 0 {
-					remaining = 0
-				}
-				cachedCreationTokensWithRatio = decimal.NewFromInt(int64(remaining)).Mul(dCacheCreationRatio)
-				cachedCreationTokensWithRatio = cachedCreationTokensWithRatio.Add(decimal.NewFromInt(int64(summary.CacheCreationTokens5m)).Mul(dCacheCreationRatio5m))
-				cachedCreationTokensWithRatio = cachedCreationTokensWithRatio.Add(decimal.NewFromInt(int64(summary.CacheCreationTokens1h)).Mul(dCacheCreationRatio1h))
 			}
+			// Split 5m/1h counts come from the upstream (Claude usage or the
+			// Msh-Usage-Cache-Write-Tokens-5m/1h headers); any unsplit remainder
+			// keeps the generic cache-creation price.
+			remaining := summary.CacheCreationTokens - summary.CacheCreationTokens5m - summary.CacheCreationTokens1h
+			if remaining < 0 {
+				remaining = 0
+			}
+			cachedCreationTokensWithRatio = decimal.NewFromInt(int64(remaining)).Mul(dCacheCreationRatio)
+			cachedCreationTokensWithRatio = cachedCreationTokensWithRatio.Add(decimal.NewFromInt(int64(summary.CacheCreationTokens5m)).Mul(dCacheCreationRatio5m))
+			cachedCreationTokensWithRatio = cachedCreationTokensWithRatio.Add(decimal.NewFromInt(int64(summary.CacheCreationTokens1h)).Mul(dCacheCreationRatio1h))
 		}
 
 		var imageTokensWithRatio decimal.Decimal
