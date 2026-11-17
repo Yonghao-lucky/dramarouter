@@ -230,6 +230,10 @@ function createOpenAINativeRoutes(): AdvancedCustomRoute[] {
     '/v1/audio/transcriptions',
     '/v1/audio/translations',
     '/v1/realtime',
+    // Model discovery route. Without it the channel's "fetch models" action
+    // and upstream model sync both fail with "does not configure a /v1/models
+    // route", even though the upstream serves it.
+    ADVANCED_CUSTOM_MODEL_LIST_PATH,
   ].map((path) => ({
     incoming_path: path,
     upstream_path: path,

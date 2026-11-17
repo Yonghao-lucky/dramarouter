@@ -481,9 +481,12 @@ func (m *MediaContent) ToFileSource() types.FileSource {
 }
 
 type MessageImageUrl struct {
-	Url      string `json:"url"`
-	Detail   string `json:"detail,omitempty"`
-	MimeType string
+	Url    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+	// MimeType is relay-internal bookkeeping derived from the mime_type key or
+	// the data URI prefix. It must never be sent upstream: OpenAI-compatible
+	// providers reject unknown fields inside image_url.
+	MimeType string `json:"-"`
 }
 
 func (m *MessageImageUrl) IsRemoteImage() bool {
