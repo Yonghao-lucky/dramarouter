@@ -62,6 +62,11 @@ func TestKimiCacheWriteOptionsValidation(t *testing.T) {
 		{name: "messages official 1h", run: messages(`,"cache_control":{"type":"ephemeral","ttl":"1h"}`)},
 		{name: "messages invalid ttl", run: messages(`,"cache_control":{"type":"ephemeral","ttl":"30M"}`), wantParam: "cache_control.ttl"},
 		{name: "messages invalid type", run: messages(`,"cache_control":{"type":"implicit","ttl":"1h"}`), wantParam: "cache_control.type"},
+		{name: "messages prompt_cache_options implicit 1h", run: messages(`,"prompt_cache_options":{"mode":"implicit","ttl":"1h"}`)},
+		{name: "messages prompt_cache_options ephemeral 5m", run: messages(`,"prompt_cache_options":{"mode":"ephemeral","ttl":"5m"}`)},
+		{name: "messages prompt_cache_options invalid mode", run: messages(`,"prompt_cache_options":{"mode":"readonly","ttl":"1h"}`), wantParam: "prompt_cache_options.mode"},
+		{name: "messages prompt_cache_options invalid ttl", run: messages(`,"prompt_cache_options":{"mode":"implicit","ttl":"30M"}`), wantParam: "prompt_cache_options.ttl"},
+		{name: "chat still rejects ephemeral mode", run: chat("kimi-k3.1-pro", `,"prompt_cache_options":{"mode":"ephemeral","ttl":"5m"}`), wantParam: "prompt_cache_options.mode"},
 	}
 
 	for _, tt := range tests {
@@ -77,6 +82,41 @@ func TestKimiCacheWriteOptionsValidation(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
 			assert.Equal(t, tt.wantParam, apiErr.ToOpenAIError().Param)
 			assert.Contains(t, err.Error(), tt.wantParam)
+		})
+	}
+}
+
+// Messages upstreams only honor the top-level cache_control, so a valid
+// prompt_cache_options must be mapped onto it for the requested TTL to apply.
+func TestKimiMessagesPromptCacheOptionsMapsToCacheControl(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name             string
+		model            string
+		extra            string
+		wantCacheControl string
+	}{
+		{name: "1h ttl maps to cache_control", model: "kimi-k3.1-pro", extra: `,"prompt_cache_options":{"mode":"implicit","ttl":"1h"}`, wantCacheControl: `{"ttl":"1h","type":"ephemeral"}`},
+		{name: "5m ttl maps to cache_control", model: "kimi-k3.1-pro", extra: `,"prompt_cache_options":{"mode":"ephemeral","ttl":"5m"}`, wantCacheControl: `{"ttl":"5m","type":"ephemeral"}`},
+		{name: "no ttl keeps upstream default", model: "kimi-k3.1-pro", extra: `,"prompt_cache_options":{"mode":"implicit"}`},
+		{name: "explicit cache_control wins", model: "kimi-k3.1-pro", extra: `,"cache_control":{"type":"ephemeral","ttl":"5m"},"prompt_cache_options":{"mode":"implicit","ttl":"1h"}`, wantCacheControl: `{"type":"ephemeral","ttl":"5m"}`},
+		{name: "non-kimi model is untouched", model: "claude-sonnet-4", extra: `,"prompt_cache_options":{"mode":"implicit","ttl":"1h"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			body := `{"model":"` + tt.model + `","max_tokens":8,"messages":[{"role":"user","content":"hi"}]` + tt.extra + `}`
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			req, err := GetAndValidateClaudeRequest(c)
+
+			require.NoError(t, err)
+			if tt.wantCacheControl == "" {
+				assert.Empty(t, req.CacheControl)
+				return
+			}
+			assert.JSONEq(t, tt.wantCacheControl, string(req.CacheControl))
 		})
 	}
 }
